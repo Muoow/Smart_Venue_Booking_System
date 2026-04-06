@@ -26,6 +26,11 @@ public class JwtInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
+        String uri = request.getRequestURI();
+        if (uri.startsWith("/actuator") || uri.startsWith("/prometheus")) {
+            return true;
+        }
+
         if(!(handler instanceof HandlerMethod handlerMethod)){
             return true;
         }
