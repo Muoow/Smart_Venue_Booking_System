@@ -18,11 +18,6 @@ public class LogInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
-        String uri = request.getRequestURI();
-        if (uri.contains("/actuator/prometheus")) {
-            return true;
-        }
-
         request.setAttribute(START_TIME, System.currentTimeMillis());
         return true;
     }
@@ -30,15 +25,12 @@ public class LogInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex)
             throws Exception {
-        String uri = request.getRequestURI();
-        if (uri.contains("/actuator/prometheus")) {
-            return;
-        }
 
         long start = (long) request.getAttribute(START_TIME);
         long cost = System.currentTimeMillis() - start;
 
         String method = request.getMethod();
+        String uri = request.getRequestURI();
         String queryString = request.getQueryString();
         String clientIp = getClientIp(request);
         int status = response.getStatus();
