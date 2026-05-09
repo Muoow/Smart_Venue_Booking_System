@@ -12,6 +12,14 @@ spring:
     port: 5672
     username: admin
     password: admin123
+    connection-timeout: 1s
+    template:
+      retry:
+        multiplier: 2
+        enabled: true
+    listener:
+      direct:
+        acknowledge-mode: auto
 management:
   endpoints:
     web:

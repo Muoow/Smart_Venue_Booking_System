@@ -9,6 +9,7 @@ import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -77,45 +78,71 @@ public class RabbitConfig {
     }
 
     @Bean
-    public DirectExchange reservationExchange() {
-        return new DirectExchange(MqConstant.RESERVATION_EXCHANGE);
+    MessageConverter messageConverter() {
+        return new Jackson2JsonMessageConverter();
     }
 
     @Bean
-    public List<Queue> reservationQueues() {
-        List<Queue> queues = new ArrayList<>();
-        for(int i = 0; i < MqConstant.QUEUE_PARTITIONS; i++) {
-            queues.add(new Queue(MqConstant.RESERVATION_QUEUE + i));
-        }
-        return queues;
-    }
+    public Declarables reservationDeclarables() {
+        List<Declarable> declarables = new ArrayList<>();
 
-    @Bean
-    public List<Binding> binding(DirectExchange reservationExchange, List<Queue> reservationQueues) {
-        List<Binding> bindings = new ArrayList<>();
-        for(int i = 0; i < reservationQueues.size(); i++) {
-            bindings.add(BindingBuilder
-                    .bind(reservationQueues.get(i))
-                    .to(reservationExchange)
-                    .with(MqConstant.RESERVATION_ROUTING_KEY + i));
-        }
-        return bindings;
-    }
+        DirectExchange exchange = new DirectExchange(MqConstant.RESERVATION_EXCHANGE);
+        declarables.add(exchange);
 
-    @Bean
-    public List<SimpleMessageListenerContainer> simpleMessageListenerContainers(CachingConnectionFactory connectionFactory, ReservationHandler reservationHandler) {
-        List<SimpleMessageListenerContainer> containers = new ArrayList<>();
         for (int i = 0; i < MqConstant.QUEUE_PARTITIONS; i++) {
-            SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
-            container.setQueueNames(MqConstant.RESERVATION_QUEUE + i);
+            String queueName = MqConstant.RESERVATION_QUEUE + i;
+            String routingKey = MqConstant.RESERVATION_ROUTING_KEY + i;
+
+            Queue queue = new Queue(queueName, true); // durable
+            Binding binding = BindingBuilder
+                    .bind(queue)
+                    .to(exchange)
+                    .with(routingKey);
+
+            declarables.add(queue);
+            declarables.add(binding);
+        }
+
+        return new Declarables(declarables);
+    }
+
+    @Bean
+    public List<SimpleMessageListenerContainer> reservationListeners(
+            CachingConnectionFactory connectionFactory,
+            ReservationHandler reservationHandler) {
+
+        List<SimpleMessageListenerContainer> containers = new ArrayList<>();
+
+        for (int i = 0; i < MqConstant.QUEUE_PARTITIONS; i++) {
+            String queueName = MqConstant.RESERVATION_QUEUE + i;
+
+            SimpleMessageListenerContainer container =
+                    new SimpleMessageListenerContainer(connectionFactory);
+
+            container.setQueueNames(queueName);
+
             container.setMessageListener((Message message) -> {
-                Long payload = ByteBuffer.wrap(message.getBody()).getLong();
-                reservationHandler.process(payload);
+                byte[] body = message.getBody();
+
+                if (body.length != 8) {
+                    throw new IllegalArgumentException("invalid payload length: " + body.length);
+                }
+
+                long reservationId = ByteBuffer.wrap(body).getLong();
+
+                reservationHandler.process(reservationId);
             });
-            container.setConcurrentConsumers(2);
-            container.setMaxConcurrentConsumers(5);
+
+            container.setConcurrentConsumers(1);
+            container.setMaxConcurrentConsumers(1);
+            container.setAcknowledgeMode(AcknowledgeMode.AUTO);
+            container.setDefaultRequeueRejected(false);
+
+            container.start();
+
             containers.add(container);
         }
+
         return containers;
     }
 
@@ -125,12 +152,12 @@ public class RabbitConfig {
     }
 
     @Bean
-    public Queue StatusQueue() {
+    public Queue statusQueue() {
         return new Queue(MqConstant.ORDER_QUEUE);
     }
 
     @Bean
-    public Binding StatusBinding(DirectExchange statusExchange, Queue StatusQueue) {
+    public Binding statusBinding(DirectExchange statusExchange, Queue StatusQueue) {
         return BindingBuilder.bind(StatusQueue)
                 .to(statusExchange)
                 .with(MqConstant.ORDER_ROUTING_KEY);

@@ -1,22 +1,27 @@
 package com.courtflow.homework.common.exception;
 
-import com.courtflow.homework.common.dto.response.ResultCode;
-
+/**
+ * 业务异常基类
+ */
 public class BusinessException extends RuntimeException {
 
-    private final ResultCode resultCode;
+    private final int code;
 
-    public BusinessException(ResultCode resultCode) {
-        super(resultCode.getMessage());
-        this.resultCode = resultCode;
+    public BusinessException(String message) {
+        this(500, message);
     }
 
-    public BusinessException(ResultCode resultCode, String message) {
+    public BusinessException(int code, String message) {
         super(message);
-        this.resultCode = resultCode;
+        this.code = code;
     }
 
-    public ResultCode getResultCode() {
-        return resultCode;
+    public BusinessException(int code, String message, Throwable cause) {
+        super(message, cause);
+        this.code = code;
+    }
+
+    public int getCode() {
+        return code;
     }
 }

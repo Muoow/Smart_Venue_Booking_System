@@ -16,6 +16,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Date;
 
 @Service
@@ -46,7 +48,7 @@ public class AuthServiceImpl implements AuthService {
                 .eq(UserAuth::getIdentifier, username);
 
         if (authMapper.selectOne(queryWrapper) != null) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "Username already exists.");
+            throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "Username already exists.");
         }
 
         User user = User.builder()
@@ -80,17 +82,16 @@ public class AuthServiceImpl implements AuthService {
         UserAuth userAuth = authMapper.selectOne(queryWrapper);
 
         if (userAuth == null || !passwordEncoder.matches(password, userAuth.getCredential())) {
-            throw new BusinessException(ResultCode.UNAUTHORIZED, "Username or password incorrect.");
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "Username or password incorrect.");
         }
 
         User user = userMapper.selectById(userAuth.getUserId());
 
         if (user == null || user.getStatus() == UserStatusEnum.DISABLED) {
-            throw new BusinessException(ResultCode.FORBIDDEN, "User has disabled.");
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "User has disabled.");
         }
 
-        userAuth.setLastLoginAt(System.currentTimeMillis());
-        userAuth.setUpdatedAt(new Date());
+        userAuth.setLastLoginAt(Date.from(LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant()));
         authMapper.updateById(userAuth);
 
         return jwtUtils.generateToken(user);

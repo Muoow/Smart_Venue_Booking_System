@@ -19,7 +19,7 @@ public class AuthController {
         this.authService = authService;
     }
 
-    @GetMapping("/register")
+    @PostMapping("/register")
     public ApiResponse<String> register(@RequestBody Map<String,String> req){
 
         authService.register(req.get("username"), req.get("password"));

@@ -22,12 +22,12 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(jwtInterceptor)
-                .addPathPatterns("/**")
-                .excludePathPatterns("/auth/login", "/auth/register")
-                .excludePathPatterns("/actuator/**");
-        registry.addInterceptor(logInterceptor)
-                .addPathPatterns("/**")
-                .excludePathPatterns("/actuator/**");
+//        registry.addInterceptor(jwtInterceptor)
+//                .addPathPatterns("/**")
+//                .excludePathPatterns("/auth/login", "/auth/register")
+//                .excludePathPatterns("/actuator/**");
+//        registry.addInterceptor(logInterceptor)
+//                .addPathPatterns("/**")
+//                .excludePathPatterns("/actuator/**");
     }
 }

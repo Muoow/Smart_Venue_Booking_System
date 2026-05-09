@@ -18,7 +18,7 @@ public class UserAuth {
     private String identityType;
     private String identifier;
     private String credential;
-    private Long lastLoginAt;
+    private Date lastLoginAt;
     private Date createdAt;
     private Date updatedAt;
 }
