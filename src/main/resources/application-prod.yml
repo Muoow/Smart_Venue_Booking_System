@@ -1,19 +1,23 @@
 spring:
   datasource:
-    url: jdbc:mysql://mysql:3306/courtflow
-    username: admin
-    password: admin123
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:courtflow}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&useUnicode=true&characterEncoding=UTF-8
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USERNAME:admin}
+    password: ${DB_PASSWORD:admin123}
   data:
     redis:
-      host: redis
-      port: 6379
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
   rabbitmq:
-    host: rabbitmq
-    port: 5672
-    username: admin
-    password: admin123
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:admin}
+    password: ${RABBITMQ_PASSWORD:admin123}
 management:
   endpoints:
     web:
       exposure:
-        include: prometheus
+        include: health,prometheus
+courtflow:
+  middleware:
+    enabled: ${COURTFLOW_MIDDLEWARE_ENABLED:true}

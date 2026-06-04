@@ -5,11 +5,15 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.courtflow.homework.common.enums.ResourceStatusEnum;
 import com.courtflow.homework.common.enums.ResourceTypeEnum;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Builder
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
 @TableName("venue_resource")
 public class VenueResource {
     @TableId(type = IdType.AUTO)

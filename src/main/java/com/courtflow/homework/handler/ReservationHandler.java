@@ -9,8 +9,6 @@ import com.courtflow.homework.entity.VenueResource;
 import com.courtflow.homework.mapping.ReservationMapper;
 import com.courtflow.homework.mapping.TimeSlotMapper;
 import com.courtflow.homework.mapping.VenueResourceMapper;
-import jakarta.annotation.Resource;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,9 +22,6 @@ public class ReservationHandler {
     private final VenueResourceMapper venueResourceMapper;
 
     private final TimeSlotMapper timeSlotMapper;
-
-    @Resource
-    private RabbitTemplate rabbitTemplate;
 
     public ReservationHandler(ReservationMapper reservationMapper, VenueResourceMapper venueResourceMapper, TimeSlotMapper timeSlotMapper) {
         this.reservationMapper = reservationMapper;
@@ -51,8 +46,9 @@ public class ReservationHandler {
         VenueResource resource = venueResourceMapper.selectById(resourceId);
         if (resource == null) return;
 
-        int unitMinutes = resource.getUnitMinutes();
+        int unitMinutes = resource.getUnitMinutes() == null || resource.getUnitMinutes() <= 0 ? 10 : resource.getUnitMinutes();
         int totalSlots = 24 * 60 / unitMinutes;
+        int capacity = resource.getCapacity() == null || resource.getCapacity() <= 0 ? 1 : resource.getCapacity();
 
         List<TimeSlot> slots = new ArrayList<>();
         for (int unit = startUnit; unit <= endUnit; unit++) {
@@ -84,18 +80,39 @@ public class ReservationHandler {
         }
 
         for (TimeSlot slot : slots) {
+            if (slot.getStatus() == TimeSlotStatusEnum.BLOCKED) {
+                reservation.setStatus(ReservationStatusEnum.EXPIRED);
+                reservation.setUpdatedAt(new Date());
+                reservationMapper.updateById(reservation);
+                return;
+            }
+            int currentBooked = slot.getBookedCount() == null ? 0 : slot.getBookedCount();
+            if (currentBooked + reservation.getSize() > capacity) {
+                reservation.setStatus(ReservationStatusEnum.EXPIRED);
+                reservation.setUpdatedAt(new Date());
+                reservationMapper.updateById(reservation);
+                return;
+            }
+        }
+
+        for (TimeSlot slot : slots) {
+            int currentBooked = slot.getBookedCount() == null ? 0 : slot.getBookedCount();
+            int nextBooked = currentBooked + reservation.getSize();
             int updated = timeSlotMapper.update(null,
                     Wrappers.<TimeSlot>lambdaUpdate()
                             .eq(TimeSlot::getId, slot.getId())
-                            .eq(TimeSlot::getBookedCount, slot.getBookedCount())
-                            .set(TimeSlot::getBookedCount, slot.getBookedCount() + reservation.getSize())
+                            .eq(TimeSlot::getBookedCount, currentBooked)
+                            .set(TimeSlot::getBookedCount, nextBooked)
+                            .set(TimeSlot::getStatus, nextBooked >= capacity ? TimeSlotStatusEnum.FULL : TimeSlotStatusEnum.FREE)
+                            .set(TimeSlot::getUpdatedAt, new Date())
             );
             if (updated != 1) {
                 throw new RuntimeException("Inventory update failed.");
             }
         }
 
-        reservation.setStatus(ReservationStatusEnum.FINISHED);
+        reservation.setStatus(ReservationStatusEnum.RESERVED);
+        reservation.setUpdatedAt(new Date());
         reservationMapper.updateById(reservation);
     }
 }

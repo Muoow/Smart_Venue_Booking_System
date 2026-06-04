@@ -1,0 +1,40 @@
+﻿meta {
+  name: Reservation Detail
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/reservation/{{reservationId}}
+  body: none
+}
+
+headers {
+  Authorization: Bearer {{bearerToken}}
+}
+
+tests {
+  test("detail should succeed", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.code).to.equal(200);
+  });
+}
+
+docs {
+  ```json
+  {
+    "code": 200,
+    "message": "Success",
+    "data": {
+      "id": 9,
+      "venueId": 1,
+      "resourceId": 2,
+      "slotDate": "2026-05-28T16:00:00.000+00:00",
+      "size": 4,
+      "startUnit": 108,
+      "endUnit": 111,
+      "status": 1
+    }
+  }
+  ```
+}

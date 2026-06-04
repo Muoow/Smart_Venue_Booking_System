@@ -1,0 +1,32 @@
+﻿meta {
+  name: Cancel Reservation
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/reservation/{{reservationId}}/cancel
+  body: none
+}
+
+headers {
+  Authorization: Bearer {{bearerToken}}
+}
+
+tests {
+  test("cancel should succeed", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.code).to.equal(200);
+    expect(res.body.data).to.equal(true);
+  });
+}
+
+docs {
+  ```json
+  {
+    "code": 200,
+    "message": "Success",
+    "data": true
+  }
+  ```
+}

@@ -1,0 +1,40 @@
+﻿meta {
+  name: User Profile
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/user/profile
+  body: none
+}
+
+headers {
+  Authorization: Bearer {{bearerToken}}
+}
+
+tests {
+  test("profile should succeed", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.code).to.equal(200);
+    expect(res.body.data.username).to.equal('demo');
+  });
+}
+
+docs {
+  ```json
+  {
+    "code": 200,
+    "message": "Success",
+    "data": {
+      "username": "demo",
+      "totalReservations": 4,
+      "balance": 12000,
+      "id": 1,
+      "role": "USER",
+      "cancelledReservations": 2,
+      "activeReservations": 1
+    }
+  }
+  ```
+}

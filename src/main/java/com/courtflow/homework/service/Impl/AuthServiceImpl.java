@@ -39,18 +39,23 @@ public class AuthServiceImpl implements AuthService {
 
     @Transactional
     @Override
-    public void register(String username, String password) {
+    public void register(String username, String nickname, String password) {
+        String normalizedUsername = normalizeUsername(username);
+        String normalizedNickname = normalizeNickname(nickname);
+        validatePassword(password);
 
         LambdaQueryWrapper<UserAuth> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(UserAuth::getIdentityType, "username")
-                .eq(UserAuth::getIdentifier, username);
+                .eq(UserAuth::getIdentifier, normalizedUsername);
 
         if (authMapper.selectOne(queryWrapper) != null) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "Username already exists.");
+            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名已存在。");
         }
 
         User user = User.builder()
-                .username(username)
+                .username(normalizedUsername)
+                .nickname(normalizedNickname)
+                .fullName(normalizedNickname)
                 .status(UserStatusEnum.ENABLED)
                 .balance(0L)
                 .role("USER")
@@ -63,7 +68,7 @@ public class AuthServiceImpl implements AuthService {
         UserAuth userAuth = UserAuth.builder()
                 .userId(user.getId())
                 .identityType("username")
-                .identifier(username)
+                .identifier(normalizedUsername)
                 .credential(encodedPassword)
                 .build();
 
@@ -72,21 +77,25 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public String login(String username, String password) {
+        String normalizedUsername = normalizeUsername(username);
+        if (password == null || password.isBlank()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "密码不能为空。");
+        }
 
         LambdaQueryWrapper<UserAuth> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(UserAuth::getIdentityType, "username")
-                .eq(UserAuth::getIdentifier, username);
+                .eq(UserAuth::getIdentifier, normalizedUsername);
 
         UserAuth userAuth = authMapper.selectOne(queryWrapper);
 
         if (userAuth == null || !passwordEncoder.matches(password, userAuth.getCredential())) {
-            throw new BusinessException(ResultCode.UNAUTHORIZED, "Username or password incorrect.");
+            throw new BusinessException(ResultCode.UNAUTHORIZED, "用户名或密码错误。");
         }
 
         User user = userMapper.selectById(userAuth.getUserId());
 
         if (user == null || user.getStatus() == UserStatusEnum.DISABLED) {
-            throw new BusinessException(ResultCode.FORBIDDEN, "User has disabled.");
+            throw new BusinessException(ResultCode.FORBIDDEN, "当前账号已被禁用。");
         }
 
         userAuth.setLastLoginAt(System.currentTimeMillis());
@@ -94,5 +103,36 @@ public class AuthServiceImpl implements AuthService {
         authMapper.updateById(userAuth);
 
         return jwtUtils.generateToken(user);
+    }
+
+    private String normalizeUsername(String username) {
+        if (username == null || username.isBlank()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名不能为空。");
+        }
+        String normalized = username.trim();
+        if (normalized.length() < 3 || normalized.length() > 32) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "用户名长度需在 3 到 32 位之间。");
+        }
+        return normalized;
+    }
+
+    private String normalizeNickname(String nickname) {
+        if (nickname == null || nickname.isBlank()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "昵称不能为空。");
+        }
+        String normalized = nickname.trim();
+        if (normalized.length() < 2 || normalized.length() > 32) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "昵称长度需在 2 到 32 位之间。");
+        }
+        return normalized;
+    }
+
+    private void validatePassword(String password) {
+        if (password == null || password.isBlank()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "密码不能为空。");
+        }
+        if (password.length() < 5 || password.length() > 64) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "密码长度需在 5 到 64 位之间。");
+        }
     }
 }

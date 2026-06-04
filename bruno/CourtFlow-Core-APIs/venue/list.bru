@@ -1,0 +1,46 @@
+﻿meta {
+  name: Venue List
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/venue/list
+  body: none
+}
+
+tests {
+  test("venue list should succeed", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.code).to.equal(200);
+    expect(res.body.data).to.be.an('array');
+  });
+}
+
+docs {
+  ```json
+  {
+    "code": 200,
+    "message": "Success",
+    "data": [
+      {
+        "id": 1,
+        "name": "主体体育馆",
+        "type": "羽毛球/篮球",
+        "resourceCount": 2,
+        "resources": [
+          {
+            "id": 1,
+            "name": "主体体育馆 A3",
+            "resourceType": 1,
+            "capacity": 4,
+            "price": 48,
+            "unitMinutes": 10,
+            "status": 1
+          }
+        ]
+      }
+    ]
+  }
+  ```
+}

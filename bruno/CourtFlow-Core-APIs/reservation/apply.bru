@@ -1,0 +1,49 @@
+﻿meta {
+  name: Apply Reservation
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/reservation/apply
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{bearerToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "venueId": {{venueId}},
+    "resourceId": {{resourceId}},
+    "slotDate": "{{slotDate}}",
+    "startUnit": {{startUnit}},
+    "endUnit": {{endUnit}},
+    "size": {{size}}
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data) {
+    bru.setVar("reservationId", res.body.data);
+  }
+}
+
+tests {
+  test("apply should succeed", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.code).to.equal(200);
+  });
+}
+
+docs {
+  ```json
+  {
+    "code": 200,
+    "message": "Success",
+    "data": 9
+  }
+  ```
+}

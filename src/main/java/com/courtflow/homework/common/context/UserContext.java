@@ -3,9 +3,9 @@ package com.courtflow.homework.common.context;
 public class UserContext {
 
     private static final ThreadLocal<Long> USER_ID = new ThreadLocal<>();
-    private static final ThreadLocal<Integer> ROLE = new ThreadLocal<>();
+    private static final ThreadLocal<String> ROLE = new ThreadLocal<>();
 
-    public static void set(Long userId, Integer role) {
+    public static void set(Long userId, String role) {
         USER_ID.set(userId);
         ROLE.set(role);
     }
@@ -14,7 +14,7 @@ public class UserContext {
         return USER_ID.get();
     }
 
-    public static Integer getRole() {
+    public static String getRole() {
         return ROLE.get();
     }
 

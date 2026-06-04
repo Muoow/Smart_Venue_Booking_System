@@ -9,8 +9,8 @@ import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.handler.HandlerMethod;
 import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 @Component
@@ -47,6 +47,7 @@ public class JwtInterceptor implements HandlerInterceptor {
         String authHeader = request.getHeader("Authorization");
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return false;
         }
 
@@ -54,14 +55,19 @@ public class JwtInterceptor implements HandlerInterceptor {
         try {
             Claims claims = jwtUtils.parseToken(token);
             Long userId = claims.get("userId", Long.class);
-            Integer role = claims.get("role", Integer.class);
+            if (userId == null && claims.getSubject() != null) {
+                userId = Long.parseLong(claims.getSubject());
+            }
+            String role = claims.get("role", String.class);
 
             UserContext.set(userId, role);
             return true;
 
         } catch (ExpiredJwtException e) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return false;
         } catch (JwtException e) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return false;
         }
     }

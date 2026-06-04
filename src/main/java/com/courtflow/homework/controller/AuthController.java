@@ -1,14 +1,16 @@
 package com.courtflow.homework.controller;
 
+import com.courtflow.homework.common.annonation.CheckToken;
+import com.courtflow.homework.common.dto.request.LoginRequest;
+import com.courtflow.homework.common.dto.request.RegisterRequest;
 import com.courtflow.homework.common.dto.response.ApiResponse;
 import com.courtflow.homework.service.AuthService;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 @RestController
+@CheckToken(required = false)
 @RequestMapping("/auth")
 public class AuthController {
 
@@ -19,19 +21,18 @@ public class AuthController {
         this.authService = authService;
     }
 
-    @GetMapping("/register")
-    public ApiResponse<String> register(@RequestBody Map<String,String> req){
-
-        authService.register(req.get("username"), req.get("password"));
-
-        return ApiResponse.success(null);
+    @PostMapping("/register")
+    public ApiResponse<String> register(@RequestBody RegisterRequest request){
+        authService.register(request == null ? null : request.getUsername(),
+                request == null ? null : request.getNickname(),
+                request == null ? null : request.getPassword());
+        return ApiResponse.success("注册成功。");
     }
 
     @PostMapping("/login")
-    public ApiResponse<String> login(@RequestBody Map<String,String> req){
-
-        String token = authService.login(req.get("username"), req.get("password"));
-
+    public ApiResponse<String> login(@RequestBody LoginRequest request){
+        String token = authService.login(request == null ? null : request.getUsername(),
+                request == null ? null : request.getPassword());
         return ApiResponse.success(token);
     }
 }
