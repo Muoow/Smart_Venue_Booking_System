@@ -13,7 +13,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -86,7 +85,7 @@ public class RabbitConfig {
     public List<Queue> reservationQueues() {
         List<Queue> queues = new ArrayList<>();
         for(int i = 0; i < MqConstant.QUEUE_PARTITIONS; i++) {
-            queues.add(new Queue(MqConstant.RESERVATION_QUEUE + i));
+            queues.add(new Queue(MqConstant.RESERVATION_QUEUE + i, true));
         }
         return queues;
     }
@@ -110,11 +109,20 @@ public class RabbitConfig {
             SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
             container.setQueueNames(MqConstant.RESERVATION_QUEUE + i);
             container.setMessageListener((Message message) -> {
-                Long payload = ByteBuffer.wrap(message.getBody()).getLong();
-                reservationHandler.process(payload);
+                String text = new String(message.getBody(), StandardCharsets.UTF_8).trim();
+                if (text.startsWith("\"") && text.endsWith("\"") && text.length() >= 2) {
+                    text = text.substring(1, text.length() - 1);
+                }
+                try {
+                    reservationHandler.process(Long.parseLong(text));
+                } catch (NumberFormatException ex) {
+                    log.error("Invalid reservation message payload: {}", text, ex);
+                }
             });
-            container.setConcurrentConsumers(2);
-            container.setMaxConcurrentConsumers(5);
+            // Keep each partition queue single-threaded to preserve per-partition ordering.
+            container.setConcurrentConsumers(1);
+            container.setMaxConcurrentConsumers(1);
+            container.setPrefetchCount(1);
             containers.add(container);
         }
         return containers;

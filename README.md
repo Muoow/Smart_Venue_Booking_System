@@ -74,4 +74,52 @@ scripts                                辅助脚本
 - Docker 部署可使用仓库根目录的 `Dockerfile` 和 `docker-compose.yml`
 - 生产环境默认使用 `prod` 配置，依赖 MySQL、Redis、RabbitMQ
 - GitHub Actions 会在推送到 `main` 后自动构建并推送 Docker 镜像
-- 如果需要把 demo 数据同步到远端数据库，可参考 `scripts/apply-remote-demo-data.ps1`
+
+### 远端初始化
+
+- 正式远端初始化脚本：`scripts/bootstrap-remote-prod.ps1`
+- 远端 `compose` 模板同步脚本：`scripts/sync-remote-compose.ps1`
+- 脚本会执行以下动作：
+  - 上传 `deploy/mysql/init/01_schema.sql`
+  - 上传 `deploy/mysql/init/02_seed.sql`
+  - 进入远端 `mysql` 容器幂等执行建表和基线数据初始化
+  - 按需重启远端应用容器
+  - 对 `actuator/health` 做健康检查
+
+Windows PowerShell 示例：
+
+```powershell
+.\scripts\bootstrap-remote-prod.ps1 `
+  -ServerHost 150.158.132.178 `
+  -ServerUser ubuntu `
+  -KeyPath "c:\Users\GALAXY\Desktop\新建文件夹\main\myserver_ssh.pem" `
+  -RemoteDir /home/ubuntu/courtflow `
+  -DbContainer mysql `
+  -DbName courtflow `
+  -DbUser admin `
+  -DbPassword admin123 `
+  -AppContainer courtflow `
+  -RestartApp
+```
+
+- 如果只想补库表，不重启应用，可去掉 `-RestartApp`
+- 如果只想补表不补数据，可加 `-SkipSeed`
+- 如果只想补数据不补表，可加 `-SkipSchema`
+- 当前远端基线数据已与现版本账号体系对齐：
+  - `caojinshuo / 12345`
+  - `zhangxiang / 12345`
+  - `admin / 12345`
+
+### 初始化文件
+
+- `deploy/mysql/init/01_schema.sql`：MySQL 正式表结构
+- `deploy/mysql/init/02_seed.sql`：当前版本标准基线数据，可重复执行
+- `deploy/remote/docker-compose.remote.yml`：远端运行目录使用的正式 `compose` 模板
+- `scripts/sync-remote-compose.ps1`：把正式 `compose` 模板同步到远端运行目录，并自动备份旧文件
+- `scripts/apply-remote-demo-data.ps1`：旧的本地隧道灌库脚本，仅适合临时场景，不再作为正式远端初始化入口
+
+### 推荐顺序
+
+1. 先执行 `scripts/sync-remote-compose.ps1`，把远端运行目录的 `docker-compose.yml` 对齐到仓库模板
+2. 再执行 `scripts/bootstrap-remote-prod.ps1`，完成建表、灌数和健康检查
+3. 如需重新拉起整套服务，再到远端执行 `docker compose up -d`

@@ -9,6 +9,7 @@ import com.courtflow.homework.common.enums.PaymentBizTypeEnum;
 import com.courtflow.homework.common.enums.PaymentStatusEnum;
 import com.courtflow.homework.common.enums.ReservationStatusEnum;
 import com.courtflow.homework.common.exception.BusinessException;
+import com.courtflow.homework.common.utils.BusinessIdGenerator;
 import com.courtflow.homework.entity.Order;
 import com.courtflow.homework.entity.Payment;
 import com.courtflow.homework.entity.Reservation;
@@ -21,7 +22,6 @@ import com.courtflow.homework.service.OrderWorkflowService;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.text.SimpleDateFormat;
 import java.util.*;
 
 @RestController
@@ -38,18 +38,22 @@ public class OrderController {
 
     private final OrderWorkflowService orderWorkflowService;
 
+    private final BusinessIdGenerator businessIdGenerator;
+
     public OrderController(
             OrderMapper orderMapper,
             PaymentMapper paymentMapper,
             ReservationMapper reservationMapper,
             VenueResourceMapper venueResourceMapper,
-            OrderWorkflowService orderWorkflowService
+            OrderWorkflowService orderWorkflowService,
+            BusinessIdGenerator businessIdGenerator
     ) {
         this.orderMapper = orderMapper;
         this.paymentMapper = paymentMapper;
         this.reservationMapper = reservationMapper;
         this.venueResourceMapper = venueResourceMapper;
         this.orderWorkflowService = orderWorkflowService;
+        this.businessIdGenerator = businessIdGenerator;
     }
 
     @GetMapping("/my")
@@ -269,7 +273,7 @@ public class OrderController {
     }
 
     private String generateOrderNo() {
-        return "CF" + new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
+        return businessIdGenerator.nextId("CF");
     }
 
     private String orderStatusLabel(OrderStatusEnum status) {

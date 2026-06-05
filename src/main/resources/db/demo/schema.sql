@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS `order` (
     status INT,
     expired_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (order_no)
 );
 
 CREATE TABLE IF NOT EXISTS payment (
@@ -89,7 +90,9 @@ CREATE TABLE IF NOT EXISTS payment (
     status_note VARCHAR(255),
     paid_at TIMESTAMP,
     processed_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (payment_no),
+    UNIQUE (channel_trade_no)
 );
 
 CREATE TABLE IF NOT EXISTS venue_admin (

@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import json
 import math
 import statistics
@@ -111,6 +111,8 @@ def run_endpoint(case, concurrency, rounds_per_worker):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://localhost:8081")
+    parser.add_argument("--username", default="caojinshuo")
+    parser.add_argument("--password", default="12345")
     parser.add_argument("--concurrency", type=int, default=12)
     parser.add_argument("--rounds", type=int, default=5)
     args = parser.parse_args()
@@ -120,7 +122,7 @@ def main():
     login_result = http_request(
         "POST",
         args.base_url + "/auth/login",
-        body={"username": "demo", "password": "demo"},
+        body={"username": args.username, "password": args.password},
     )
     if not login_result["ok"] or not login_result.get("body") or not login_result["body"].get("data"):
         raise SystemExit("Failed to acquire token before load test.")
@@ -134,7 +136,7 @@ def main():
             "method": "POST",
             "path": "/auth/login",
             "url": args.base_url + "/auth/login",
-            "body": {"username": "demo", "password": "demo"},
+            "body": {"username": args.username, "password": args.password},
         },
         {
             "name": "Venue List API",

@@ -28,7 +28,9 @@ def http_request(method, url, body=None, headers=None, timeout=15):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", default="http://127.0.0.1:18082")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8080")
+    parser.add_argument("--username", default="caojinshuo")
+    parser.add_argument("--password", default="12345")
     parser.add_argument("--resource-id", type=int, default=2)
     parser.add_argument("--venue-id", type=int, default=1)
     parser.add_argument("--size", type=int, default=1)
@@ -41,11 +43,11 @@ def main():
     _, login = http_request(
         "POST",
         args.base_url + "/auth/login",
-        body={"username": "demo", "password": "demo"},
+        body={"username": args.username, "password": args.password},
     )
     token = login.get("data")
     if not token:
-        raise SystemExit("failed to login demo user")
+        raise SystemExit(f"failed to login user: {args.username}")
 
     headers = {"Authorization": f"Bearer {token}"}
     slot_date = (datetime.now() + timedelta(days=args.days_offset)).strftime("%Y-%m-%dT00:00:00")

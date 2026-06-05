@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.courtflow.homework.common.constant.MqConstant;
 import com.courtflow.homework.common.dto.request.PageQueryRequest;
 import com.courtflow.homework.common.dto.request.ReservationApplyRequest;
 import com.courtflow.homework.common.dto.response.ResultCode;
@@ -13,6 +12,7 @@ import com.courtflow.homework.common.enums.ResourceStatusEnum;
 import com.courtflow.homework.common.enums.ReservationStatusEnum;
 import com.courtflow.homework.common.enums.TimeSlotStatusEnum;
 import com.courtflow.homework.common.exception.BusinessException;
+import com.courtflow.homework.common.utils.ReservationMessagePublisher;
 import com.courtflow.homework.common.vo.ReservationVO;
 import com.courtflow.homework.entity.Order;
 import com.courtflow.homework.entity.Reservation;
@@ -23,11 +23,13 @@ import com.courtflow.homework.mapping.ReservationMapper;
 import com.courtflow.homework.mapping.TimeSlotMapper;
 import com.courtflow.homework.mapping.VenueResourceMapper;
 import com.courtflow.homework.service.ReservationService;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
@@ -45,6 +47,8 @@ public class ReservationServiceImpl implements ReservationService {
 
     private static final ConcurrentMap<String, ReentrantLock> LOCAL_SLOT_LOCKS = new ConcurrentHashMap<>();
     private static final int MAX_ADVANCE_BOOKING_DAYS = 14;
+    private static final DefaultRedisScript<Long> RESERVE_INVENTORY_SCRIPT = buildReserveInventoryScript();
+    private static final DefaultRedisScript<Long> RELEASE_INVENTORY_SCRIPT = buildReleaseInventoryScript();
 
     private final ReservationMapper reservationMapper;
 
@@ -54,11 +58,10 @@ public class ReservationServiceImpl implements ReservationService {
 
     private final VenueResourceMapper venueResourceMapper;
 
-    @Autowired(required = false)
-    private RedisTemplate<String, Object> redisTemplate;
+    private final ReservationMessagePublisher reservationMessagePublisher;
 
     @Autowired(required = false)
-    private RabbitTemplate rabbitTemplate;
+    private RedisTemplate<String, Object> redisTemplate;
 
     @Value("${courtflow.demo.enabled:false}")
     private boolean demoEnabled;
@@ -68,12 +71,14 @@ public class ReservationServiceImpl implements ReservationService {
             ReservationMapper reservationMapper,
             TimeSlotMapper timeSlotMapper,
             OrderMapper orderMapper,
-            VenueResourceMapper venueResourceMapper
+            VenueResourceMapper venueResourceMapper,
+            ReservationMessagePublisher reservationMessagePublisher
     ) {
         this.reservationMapper = reservationMapper;
         this.timeSlotMapper = timeSlotMapper;
         this.orderMapper = orderMapper;
         this.venueResourceMapper = venueResourceMapper;
+        this.reservationMessagePublisher = reservationMessagePublisher;
     }
 
     @Override
@@ -103,23 +108,33 @@ public class ReservationServiceImpl implements ReservationService {
                 .build();
         reservationMapper.insert(reservation);
 
-        if (demoEnabled || redisTemplate == null || rabbitTemplate == null) {
+        if (demoEnabled || redisTemplate == null) {
             reserveLocally(reservation, resource);
             return reservation.getId();
         }
 
-        String inventoryKey = buildInventoryKey(request);
-        Long reservedCount = redisTemplate.opsForValue().increment(inventoryKey, request.getSize());
-        if (reservedCount == null) {
-            throw new BusinessException(ResultCode.SERVER_ERROR, "Redis inventory reservation failed.");
+        boolean reserved = reserveRemoteInventory(reservation, resource);
+        if (!reserved) {
+            throw new BusinessException(ResultCode.CONFLICT, "预约人数超出当前时段容量。");
         }
 
-        int partition = resolvePartition(request.getResourceId());
-        rabbitTemplate.convertAndSend(
-                MqConstant.RESERVATION_EXCHANGE,
-                MqConstant.RESERVATION_ROUTING_KEY + partition,
-                reservation.getId()
-        );
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    sendReservationMessage(reservation);
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    if (status != STATUS_COMMITTED) {
+                        releaseRemoteInventory(reservation);
+                    }
+                }
+            });
+        } else {
+            sendReservationMessage(reservation);
+        }
 
         return reservation.getId();
     }
@@ -144,35 +159,20 @@ public class ReservationServiceImpl implements ReservationService {
             return true;
         }
 
-        if (reservation.getOrderId() != null) {
-            Order order = orderMapper.selectById(reservation.getOrderId());
-            if (order != null) {
-                if (order.getStatus() == OrderStatusEnum.UNPAID) {
-                    order.setStatus(OrderStatusEnum.CLOSED);
-                    order.setUpdatedAt(new Date());
-                    orderMapper.updateById(order);
-                }
-            }
+        return closeReservationInternal(reservation, ReservationStatusEnum.CANCELLED, true);
+    }
+
+    @Override
+    @Transactional
+    public Boolean close(Long id, ReservationStatusEnum targetStatus) {
+        Reservation reservation = reservationMapper.selectById(id);
+        if (reservation == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "预约记录不存在。");
         }
-
-        reservation.setStatus(ReservationStatusEnum.CANCELLED);
-        reservation.setUpdatedAt(new Date());
-        reservationMapper.updateById(reservation);
-
-        releaseLocalSlots(reservation);
-
-        if (demoEnabled || redisTemplate == null) {
-            return true;
+        if (targetStatus != ReservationStatusEnum.CANCELLED && targetStatus != ReservationStatusEnum.EXPIRED) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "当前预约目标状态不支持库存释放。");
         }
-
-        String inventoryKey = buildInventoryKey(
-                reservation.getResourceId(),
-                reservation.getSlotDate(),
-                reservation.getStartUnit(),
-                reservation.getEndUnit()
-        );
-        redisTemplate.opsForValue().decrement(inventoryKey, reservation.getSize());
-        return true;
+        return closeReservationInternal(reservation, targetStatus, false);
     }
 
     @Override
@@ -425,21 +425,153 @@ public class ReservationServiceImpl implements ReservationService {
         }
     }
 
-    private int resolvePartition(Long resourceId) {
-        return Math.floorMod(resourceId.intValue(), MqConstant.QUEUE_PARTITIONS);
+    private boolean closeReservationInternal(Reservation reservation, ReservationStatusEnum targetStatus, boolean closeUnpaidOrder) {
+        if (targetStatus == null) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "预约目标状态不能为空。");
+        }
+        if (reservation.getStatus() == targetStatus || reservation.getStatus() == ReservationStatusEnum.CANCELLED || reservation.getStatus() == ReservationStatusEnum.EXPIRED) {
+            return true;
+        }
+        if (reservation.getStatus() == ReservationStatusEnum.FINISHED) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "已完成预约不能关闭。");
+        }
+        if (closeUnpaidOrder && reservation.getOrderId() != null) {
+            Order order = orderMapper.selectById(reservation.getOrderId());
+            if (order != null && order.getStatus() == OrderStatusEnum.UNPAID) {
+                order.setStatus(OrderStatusEnum.CLOSED);
+                order.setUpdatedAt(new Date());
+                orderMapper.updateById(order);
+            }
+        }
+
+        reservation.setStatus(targetStatus);
+        reservation.setUpdatedAt(new Date());
+        reservationMapper.updateById(reservation);
+
+        releaseLocalSlots(reservation);
+        releaseRemoteInventory(reservation);
+        return true;
     }
 
-    private String buildInventoryKey(ReservationApplyRequest request) {
-        return buildInventoryKey(
-                request.getResourceId(),
-                request.getSlotDate(),
-                request.getStartUnit(),
-                request.getEndUnit()
+    private boolean reserveRemoteInventory(Reservation reservation, VenueResource resource) {
+        if (redisTemplate == null) {
+            return false;
+        }
+        List<String> keys = buildInventoryKeys(
+                reservation.getResourceId(),
+                reservation.getSlotDate(),
+                reservation.getStartUnit(),
+                reservation.getEndUnit()
+        );
+        Long result = redisTemplate.execute(
+                RESERVE_INVENTORY_SCRIPT,
+                new ArrayList<>(keys),
+                String.valueOf(reservation.getSize()),
+                String.valueOf(safeCapacity(resource)),
+                String.valueOf(calculateInventoryTtlSeconds(reservation.getSlotDate()))
+        );
+        return result != null && result == 1L;
+    }
+
+    private void sendReservationMessage(Reservation reservation) {
+        boolean published = reservationMessagePublisher.publish(reservation.getId(), reservation.getResourceId());
+        if (!published) {
+            reservation.setStatus(ReservationStatusEnum.EXPIRED);
+            reservation.setUpdatedAt(new Date());
+            reservationMapper.updateById(reservation);
+            releaseLocalSlots(reservation);
+            releaseRemoteInventory(reservation);
+            throw new BusinessException(ResultCode.SERVER_ERROR, "预约请求入队失败，请稍后重试。");
+        }
+    }
+
+    private void releaseRemoteInventory(Reservation reservation) {
+        if (demoEnabled || redisTemplate == null || reservation == null) {
+            return;
+        }
+        List<String> keys = buildInventoryKeys(
+                reservation.getResourceId(),
+                reservation.getSlotDate(),
+                reservation.getStartUnit(),
+                reservation.getEndUnit()
+        );
+        redisTemplate.execute(
+                RELEASE_INVENTORY_SCRIPT,
+                new ArrayList<>(keys),
+                String.valueOf(Math.max(reservation.getSize() == null ? 0 : reservation.getSize(), 0)),
+                String.valueOf(calculateInventoryTtlSeconds(reservation.getSlotDate()))
         );
     }
 
-    private String buildInventoryKey(Long resourceId, Date slotDate, Integer startUnit, Integer endUnit) {
-        return "courtflow:inventory:" + resourceId + ":" + slotDate.getTime() + ":" + startUnit + ":" + endUnit;
+    private List<String> buildInventoryKeys(Long resourceId, Date slotDate, Integer startUnit, Integer endUnit) {
+        List<String> keys = new ArrayList<>();
+        if (resourceId == null || slotDate == null || startUnit == null || endUnit == null) {
+            return keys;
+        }
+        long dateValue = normalizeSlotDate(slotDate).getTime();
+        for (int unit = startUnit; unit <= endUnit; unit++) {
+            keys.add("courtflow:inventory:" + resourceId + ":" + dateValue + ":" + unit);
+        }
+        return keys;
+    }
+
+    private long calculateInventoryTtlSeconds(Date slotDate) {
+        Date normalized = normalizeSlotDate(slotDate);
+        if (normalized == null) {
+            return 86400L;
+        }
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(normalized);
+        calendar.add(Calendar.DAY_OF_YEAR, 3);
+        long ttlMs = calendar.getTimeInMillis() - System.currentTimeMillis();
+        return Math.max(ttlMs / 1000L, 86400L);
+    }
+
+    private static DefaultRedisScript<Long> buildReserveInventoryScript() {
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setResultType(Long.class);
+        script.setScriptText("""
+                local size = tonumber(ARGV[1])
+                local capacity = tonumber(ARGV[2])
+                local ttl = tonumber(ARGV[3])
+                for i = 1, #KEYS do
+                    local current = tonumber(redis.call('GET', KEYS[i]) or '0')
+                    if current + size > capacity then
+                        return 0
+                    end
+                end
+                for i = 1, #KEYS do
+                    redis.call('INCRBY', KEYS[i], size)
+                    if ttl > 0 then
+                        redis.call('EXPIRE', KEYS[i], ttl)
+                    end
+                end
+                return 1
+                """);
+        return script;
+    }
+
+    private static DefaultRedisScript<Long> buildReleaseInventoryScript() {
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setResultType(Long.class);
+        script.setScriptText("""
+                local size = tonumber(ARGV[1])
+                local ttl = tonumber(ARGV[2])
+                for i = 1, #KEYS do
+                    local current = tonumber(redis.call('GET', KEYS[i]) or '0')
+                    local next = current - size
+                    if next <= 0 then
+                        redis.call('DEL', KEYS[i])
+                    else
+                        redis.call('SET', KEYS[i], next)
+                        if ttl > 0 then
+                            redis.call('EXPIRE', KEYS[i], ttl)
+                        end
+                    end
+                end
+                return 1
+                """);
+        return script;
     }
 
     private String buildLocalLockKey(Long resourceId, Date slotDate) {

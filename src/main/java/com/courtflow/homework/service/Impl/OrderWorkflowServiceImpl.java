@@ -8,6 +8,7 @@ import com.courtflow.homework.common.enums.PaymentStatusEnum;
 import com.courtflow.homework.common.enums.ReservationStatusEnum;
 import com.courtflow.homework.common.enums.UserStatusEnum;
 import com.courtflow.homework.common.exception.BusinessException;
+import com.courtflow.homework.common.utils.BusinessIdGenerator;
 import com.courtflow.homework.entity.Order;
 import com.courtflow.homework.entity.Payment;
 import com.courtflow.homework.entity.Reservation;
@@ -17,15 +18,14 @@ import com.courtflow.homework.mapping.PaymentMapper;
 import com.courtflow.homework.mapping.ReservationMapper;
 import com.courtflow.homework.mapping.UserMapper;
 import com.courtflow.homework.service.OrderWorkflowService;
+import com.courtflow.homework.service.ReservationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 
 @Service
@@ -38,17 +38,23 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
     private final PaymentMapper paymentMapper;
     private final UserMapper userMapper;
     private final ReservationMapper reservationMapper;
+    private final ReservationService reservationService;
+    private final BusinessIdGenerator businessIdGenerator;
 
     public OrderWorkflowServiceImpl(
             OrderMapper orderMapper,
             PaymentMapper paymentMapper,
             UserMapper userMapper,
-            ReservationMapper reservationMapper
+            ReservationMapper reservationMapper,
+            ReservationService reservationService,
+            BusinessIdGenerator businessIdGenerator
     ) {
         this.orderMapper = orderMapper;
         this.paymentMapper = paymentMapper;
         this.userMapper = userMapper;
         this.reservationMapper = reservationMapper;
+        this.reservationService = reservationService;
+        this.businessIdGenerator = businessIdGenerator;
     }
 
     @Override
@@ -176,7 +182,7 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
             order.setUpdatedAt(now);
             orderMapper.updateById(order);
 
-            cancelReservationAfterRefund(order.getId(), now);
+            cancelReservationAfterRefund(order.getId());
         } else {
             refundPayment.setStatusNote("模拟网关退款申请已提交，待管理员审核。操作人：" + operatorName);
             paymentMapper.updateById(refundPayment);
@@ -316,9 +322,8 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
 
         Reservation reservation = findReservationByOrder(order.getId());
         if (reservation != null && (reservation.getStatus() == ReservationStatusEnum.QUEUING || reservation.getStatus() == ReservationStatusEnum.RESERVED)) {
-            reservation.setStatus(expiredOnly ? ReservationStatusEnum.EXPIRED : ReservationStatusEnum.CANCELLED);
-            reservation.setUpdatedAt(now);
-            reservationMapper.updateById(reservation);
+            reservationService.close(reservation.getId(),
+                    expiredOnly ? ReservationStatusEnum.EXPIRED : ReservationStatusEnum.CANCELLED);
         }
         return order;
     }
@@ -369,7 +374,7 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
             order.setUpdatedAt(now);
             orderMapper.updateById(order);
 
-            cancelReservationAfterRefund(order.getId(), now);
+            cancelReservationAfterRefund(order.getId());
         } else {
             payment.setPayStatus(PaymentStatusEnum.FAILED);
             payment.setStatusNote(decisionNote);
@@ -475,11 +480,11 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
     }
 
     private String generatePaymentNo(String prefix) {
-        return prefix + new SimpleDateFormat("yyyyMMddHHmmssSSS", Locale.ROOT).format(new Date());
+        return businessIdGenerator.nextId(prefix);
     }
 
     private String generateChannelTradeNo(String prefix) {
-        return prefix + new SimpleDateFormat("yyyyMMddHHmmssSSS", Locale.ROOT).format(new Date());
+        return businessIdGenerator.nextId(prefix);
     }
 
     private String buildReviewNote(boolean approve, String operator, String note) {
@@ -488,12 +493,10 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
         return (approve ? "管理员审核通过。" : "管理员审核驳回。") + " 审核人：" + operatorName + suffix;
     }
 
-    private void cancelReservationAfterRefund(Long orderId, Date now) {
+    private void cancelReservationAfterRefund(Long orderId) {
         Reservation reservation = findReservationByOrder(orderId);
         if (reservation != null && (reservation.getStatus() == ReservationStatusEnum.QUEUING || reservation.getStatus() == ReservationStatusEnum.RESERVED)) {
-            reservation.setStatus(ReservationStatusEnum.CANCELLED);
-            reservation.setUpdatedAt(now);
-            reservationMapper.updateById(reservation);
+            reservationService.close(reservation.getId(), ReservationStatusEnum.CANCELLED);
         }
     }
 }

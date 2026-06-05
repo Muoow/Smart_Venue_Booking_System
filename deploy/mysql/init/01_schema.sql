@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS `order` (
     expired_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_order_no (order_no),
     KEY idx_order_user (user_id),
     KEY idx_order_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS payment (
     processed_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_payment_no (payment_no),
+    UNIQUE KEY uk_channel_trade_no (channel_trade_no),
     KEY idx_payment_order (order_id),
     KEY idx_payment_order_type (order_id, biz_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
