@@ -6,7 +6,7 @@
   <title>CourtFlow 管理后台</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
-<body>
+<body data-admin-auth="locked">
   <section class="admin-login-shell" id="admin-login-shell">
     <div class="admin-login-card">
       <div class="brand-block brand-block-dark">
@@ -32,7 +32,7 @@
         </article>
         <article class="login-highlight">
           <strong>演示环境</strong>
-          <p>当前已预填管理员账号，可直接进入后台继续联调。</p>
+          <p>当前已预填管理员账号，可直接使用 `admin / 12345` 进入后台继续联调。</p>
         </article>
       </div>
       <div class="form-grid auth-form-grid">
@@ -42,10 +42,10 @@
         </label>
         <label class="field">
           <span>管理员密码</span>
-          <input class="field-input" id="admin-password" type="password" value="demo" placeholder="管理员密码">
+          <input class="field-input" id="admin-password" type="password" value="12345" placeholder="管理员密码">
         </label>
       </div>
-      <p class="login-helper">提示：如仅需查看用户端流程，可在另一窗口打开 `/demo/index.html`。</p>
+      <p class="login-helper">提示：管理员默认账号为 `admin / 12345`，如仅需查看用户端流程，可在另一窗口打开 `/demo/index.html`。</p>
       <div class="login-actions">
         <span class="status-pill" id="admin-status">未登录</span>
         <button class="primary-btn" id="admin-login" type="button">进入管理台</button>
@@ -53,7 +53,7 @@
     </div>
   </section>
 
-  <div class="admin-shell" id="admin-shell">
+  <div class="admin-shell" id="admin-shell" hidden>
     <aside class="sidebar">
       <div class="brand-block">
         <div class="brand-logo">CF</div>
@@ -255,7 +255,7 @@
         <section class="panel">
           <div class="panel-head">
             <h3>预约管理</h3>
-            <span class="panel-note">支持筛选、取消与完结处理</span>
+            <span class="panel-note">支持筛选、取消、到场签到与结束使用处理</span>
           </div>
           <div class="filter-row">
             <label class="field inline-field">
@@ -264,6 +264,7 @@
                 <option value="">全部</option>
                 <option value="0">排队中</option>
                 <option value="1">待使用</option>
+                <option value="5">使用中</option>
                 <option value="2">已取消</option>
                 <option value="4">已完成</option>
               </select>

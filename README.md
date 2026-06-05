@@ -1,10 +1,16 @@
 # CourtFlow Smart Venue Booking System
 
-CourtFlow 是一个智能场地预约系统，包含用户端和管理端两个页面。
+CourtFlow 是一个智能场地预约系统，包含用户端和管理端两个页面，当前仓库版本已经完成本地 demo 体验、管理员履约操作和基础部署配置整理。
 
-- 用户端支持登录、注册、场地浏览、预约、取消预约、个人设置
-- 管理端支持场馆、场地、预约记录等基础管理
-- 本地可直接使用 `demo` 配置启动，无需额外安装 MySQL、Redis、RabbitMQ
+## 当前版本功能
+
+- 用户端支持用户名密码登录、注册、昵称展示与修改、密码修改
+- 用户端支持场馆与场地浏览、预约、取消预约、预约记录查看
+- 预约规则已限制为今天起 14 天内，且当天过去时段不可预约
+- 用户端预约取消已补全 toast 提示，不再出现“点击没反应”
+- 管理端支持场馆、场地、用户、订单、支付、预约记录管理
+- 管理端预约履约支持 `待使用 -> 到场签到 -> 结束使用 -> 已完成`
+- 管理端页面已做大屏和中小屏自适应，适配不同尺寸电脑
 
 ## 技术栈
 
@@ -39,9 +45,17 @@ Windows PowerShell：
 
 ## 测试账号
 
-- `caojinshuo / 12345`
-- `zhangxiang / 12345`
-- 管理员账号可在 `src/main/resources/db/demo/data.sql` 中查看
+- 用户：`caojinshuo / 12345`
+- 用户：`zhangxiang / 12345`
+- 管理员：`admin / 12345`
+
+## 管理端预约履约流程
+
+1. 用户预约并支付后，状态为`待使用`
+2. 用户到场后，管理员在后台点击`到场签到`
+3. 使用开始后，状态变为`使用中`
+4. 使用结束后，管理员点击`结束使用`
+5. 最终状态变为`已完成`
 
 ## 目录说明
 
@@ -51,10 +65,13 @@ src/main/resources/static/demo         用户端页面
 src/main/resources/static/admin        管理端页面
 src/main/resources/db/demo             demo 初始化数据
 deploy/mysql/init                      MySQL 初始化脚本
+scripts                                辅助脚本
 ```
 
-## 说明
+## 部署说明
 
-- 本地演示模式使用 H2 内存数据库
-- 生产部署仍保留 MySQL、Redis、RabbitMQ、Docker 相关配置
-- 如果需要远端部署，可继续使用 `deploy` 目录下的脚本和配置
+- 本地演示模式使用 H2 内存数据库，便于直接启动和体验
+- Docker 部署可使用仓库根目录的 `Dockerfile` 和 `docker-compose.yml`
+- 生产环境默认使用 `prod` 配置，依赖 MySQL、Redis、RabbitMQ
+- GitHub Actions 会在推送到 `main` 后自动构建并推送 Docker 镜像
+- 如果需要把 demo 数据同步到远端数据库，可参考 `scripts/apply-remote-demo-data.ps1`

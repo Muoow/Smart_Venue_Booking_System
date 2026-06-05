@@ -9,6 +9,8 @@ public enum ReservationStatusEnum implements IEnum<Integer> {
 
     RESERVED(1, "已占位"),
 
+    CHECKED_IN(5, "已签到"),
+
     CANCELLED(2, "已取消"),
 
     EXPIRED(3, "已释放"),

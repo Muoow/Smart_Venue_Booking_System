@@ -127,7 +127,8 @@ public class UserController {
                         .in(
                                 com.courtflow.homework.entity.Reservation::getStatus,
                                 ReservationStatusEnum.QUEUING,
-                                ReservationStatusEnum.RESERVED
+                                ReservationStatusEnum.RESERVED,
+                                ReservationStatusEnum.CHECKED_IN
                         )
         );
         long cancelledReservations = reservationMapper.selectCount(

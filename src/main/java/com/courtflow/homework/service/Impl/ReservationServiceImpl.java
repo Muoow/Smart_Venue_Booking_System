@@ -137,6 +137,9 @@ public class ReservationServiceImpl implements ReservationService {
         if (ReservationStatusEnum.FINISHED.equals(reservation.getStatus())) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "已完成预约不能取消。");
         }
+        if (ReservationStatusEnum.CHECKED_IN.equals(reservation.getStatus())) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "已签到预约不能取消，请先完成使用或联系管理员处理。");
+        }
         if (ReservationStatusEnum.EXPIRED.equals(reservation.getStatus())) {
             return true;
         }

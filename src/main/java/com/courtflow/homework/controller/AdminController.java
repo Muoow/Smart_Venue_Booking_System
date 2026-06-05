@@ -89,7 +89,12 @@ public class AdminController {
         );
         long reservationCount = reservationMapper.selectCount(Wrappers.<Reservation>lambdaQuery());
         long activeReservationCount = reservationMapper.selectCount(
-                Wrappers.<Reservation>lambdaQuery().in(Reservation::getStatus, ReservationStatusEnum.QUEUING, ReservationStatusEnum.RESERVED)
+                Wrappers.<Reservation>lambdaQuery().in(
+                        Reservation::getStatus,
+                        ReservationStatusEnum.QUEUING,
+                        ReservationStatusEnum.RESERVED,
+                        ReservationStatusEnum.CHECKED_IN
+                )
         );
         long userCount = userMapper.selectCount(Wrappers.<User>lambdaQuery());
         long orderCount = orderMapper.selectCount(Wrappers.<Order>lambdaQuery());
@@ -126,26 +131,21 @@ public class AdminController {
     public ApiResponse<List<Map<String, Object>>> venues() {
         assertAdmin();
 
-        Map<Long, List<VenueResource>> resourcesByVenue = venueResourceMapper.selectList(
-                        Wrappers.<VenueResource>lambdaQuery()
-                                .orderByAsc(VenueResource::getVenueId)
-                                .orderByAsc(VenueResource::getId)
-                ).stream()
-                .collect(Collectors.groupingBy(VenueResource::getVenueId));
+        Map<Long, List<Map<String, Object>>> resourcesByVenue = venueResourceMapper.selectAllForAdmin().stream()
+                .collect(Collectors.groupingBy(row -> readRowLong(row, "venueId", -1L), LinkedHashMap::new, Collectors.toList()));
 
-        List<Map<String, Object>> data = venueMapper.selectList(
-                        Wrappers.<Venue>lambdaQuery().orderByAsc(Venue::getId)
-                ).stream()
+        List<Map<String, Object>> data = venueMapper.selectAllForAdmin().stream()
                 .map(venue -> {
-                    List<VenueResource> resources = resourcesByVenue.getOrDefault(venue.getId(), List.of());
+                    Long venueId = readRowLong(venue, "venueId", null);
+                    List<Map<String, Object>> resources = resourcesByVenue.getOrDefault(venueId, List.of());
                     Map<String, Object> row = new LinkedHashMap<>();
-                    row.put("id", venue.getId());
-                    row.put("name", venue.getName());
-                    row.put("type", venue.getType());
-                    row.put("status", venue.getStatus());
+                    row.put("id", venueId);
+                    row.put("name", readRowText(venue, "venueName"));
+                    row.put("type", readRowText(venue, "venueType"));
+                    row.put("status", readRowInteger(venue, "venueStatus", 0));
                     row.put("resourceCount", resources.size());
-                    row.put("createdAt", venue.getCreatedAt());
-                    row.put("resources", resources.stream().map(this::toResourceRow).toList());
+                    row.put("createdAt", venue.get("venueCreatedAt"));
+                    row.put("resources", resources.stream().map(this::toAdminResourceRow).toList());
                     return row;
                 })
                 .toList();
@@ -206,19 +206,19 @@ public class AdminController {
     public ApiResponse<List<Map<String, Object>>> resources() {
         assertAdmin();
 
-        Map<Long, String> venueNameMap = venueMapper.selectList(
-                        Wrappers.<Venue>lambdaQuery().orderByAsc(Venue::getId)
-                ).stream()
-                .collect(Collectors.toMap(Venue::getId, Venue::getName, (a, b) -> a, LinkedHashMap::new));
+        Map<Long, String> venueNameMap = venueMapper.selectAllForAdmin().stream()
+                .collect(Collectors.toMap(
+                        row -> readRowLong(row, "venueId", null),
+                        row -> readRowText(row, "venueName"),
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ));
 
-        List<Map<String, Object>> data = venueResourceMapper.selectList(
-                        Wrappers.<VenueResource>lambdaQuery()
-                                .orderByAsc(VenueResource::getVenueId)
-                                .orderByAsc(VenueResource::getId)
-                ).stream()
+        List<Map<String, Object>> data = venueResourceMapper.selectAllForAdmin().stream()
                 .map(resource -> {
-                    Map<String, Object> row = toResourceRow(resource);
-                    row.put("venueName", venueNameMap.getOrDefault(resource.getVenueId(), "未关联场馆"));
+                    Long venueId = readRowLong(resource, "venueId", null);
+                    Map<String, Object> row = toAdminResourceRow(resource);
+                    row.put("venueName", venueNameMap.getOrDefault(venueId, "未关联场馆"));
                     return row;
                 })
                 .toList();
@@ -342,29 +342,35 @@ public class AdminController {
         if (reservation.getStatus() == ReservationStatusEnum.FINISHED) {
             return ApiResponse.success(true);
         }
-        if (reservation.getStatus() != ReservationStatusEnum.RESERVED) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "仅待履约预约可完结。");
+        if (reservation.getStatus() != ReservationStatusEnum.CHECKED_IN) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "仅已签到预约可完结，请先完成到场签到。");
         }
-        if (reservation.getOrderId() == null) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "当前预约未关联支付订单，不能直接完结。");
-        }
-        Order order = orderMapper.selectById(reservation.getOrderId());
-        if (order == null) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "预约关联订单不存在。");
-        }
-        if (order.getStatus() != OrderStatusEnum.PAID) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "仅已支付订单对应的预约可完结。");
-        }
-        long processingRefundCount = paymentMapper.selectCount(
-                Wrappers.<Payment>lambdaQuery()
-                        .eq(Payment::getOrderId, order.getId())
-                        .eq(Payment::getBizType, PaymentBizTypeEnum.REFUND)
-                        .eq(Payment::getPayStatus, PaymentStatusEnum.PROCESSING)
-        );
-        if (processingRefundCount > 0) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "当前订单退款处理中，不能完结预约。");
-        }
+        requirePaidReservationWithoutRefundProcessing(reservation);
         reservation.setStatus(ReservationStatusEnum.FINISHED);
+        reservation.setUpdatedAt(new Date());
+        reservationMapper.updateById(reservation);
+        return ApiResponse.success(true);
+    }
+
+    @PostMapping("/reservations/{id}/check-in")
+    public ApiResponse<Boolean> checkInReservation(@PathVariable Long id) {
+        assertAdmin();
+
+        Reservation reservation = reservationMapper.selectById(id);
+        if (reservation == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "预约记录不存在。");
+        }
+        if (reservation.getStatus() == ReservationStatusEnum.CHECKED_IN) {
+            return ApiResponse.success(true);
+        }
+        if (reservation.getStatus() == ReservationStatusEnum.FINISHED) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "当前预约已完成，不能重复签到。");
+        }
+        if (reservation.getStatus() != ReservationStatusEnum.RESERVED) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "仅待使用预约可签到。");
+        }
+        requirePaidReservationWithoutRefundProcessing(reservation);
+        reservation.setStatus(ReservationStatusEnum.CHECKED_IN);
         reservation.setUpdatedAt(new Date());
         reservationMapper.updateById(reservation);
         return ApiResponse.success(true);
@@ -727,14 +733,58 @@ public class AdminController {
         return row;
     }
 
+    private Map<String, Object> toAdminResourceRow(Map<String, Object> resource) {
+        Integer resourceTypeCode = readRowInteger(resource, "resourceTypeCode", null);
+        Integer statusCode = readRowInteger(resource, "resourceStatus", null);
+        ResourceTypeEnum resourceType = resourceTypeCode == null ? null : requireResourceType(resourceTypeCode);
+        ResourceStatusEnum status = statusCode == null ? null : requireResourceStatus(statusCode);
+
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", readRowLong(resource, "resourceId", null));
+        row.put("venueId", readRowLong(resource, "venueId", null));
+        row.put("name", readRowText(resource, "resourceName"));
+        row.put("resourceType", resourceTypeCode);
+        row.put("resourceTypeLabel", resourceType == null ? "未知" : resourceType.getDesc());
+        row.put("capacity", readRowInteger(resource, "capacity", 0));
+        row.put("price", readRowInteger(resource, "price", 0));
+        row.put("unitMinutes", readRowInteger(resource, "unitMinutes", 10));
+        row.put("status", statusCode);
+        row.put("statusLabel", status == ResourceStatusEnum.ENABLED ? "启用" : "禁用");
+        return row;
+    }
+
     private String reservationStatusLabel(ReservationStatusEnum status) {
         return switch (status) {
             case QUEUING -> "排队中";
             case RESERVED -> "待使用";
+            case CHECKED_IN -> "使用中";
             case CANCELLED -> "已取消";
             case EXPIRED -> "已释放";
             case FINISHED -> "已完成";
         };
+    }
+
+    private Order requirePaidReservationWithoutRefundProcessing(Reservation reservation) {
+        if (reservation.getOrderId() == null) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "当前预约未关联支付订单，不能执行履约操作。");
+        }
+        Order order = orderMapper.selectById(reservation.getOrderId());
+        if (order == null) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "预约关联订单不存在。");
+        }
+        if (order.getStatus() != OrderStatusEnum.PAID) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "仅已支付订单对应的预约可执行履约操作。");
+        }
+        long processingRefundCount = paymentMapper.selectCount(
+                Wrappers.<Payment>lambdaQuery()
+                        .eq(Payment::getOrderId, order.getId())
+                        .eq(Payment::getBizType, PaymentBizTypeEnum.REFUND)
+                        .eq(Payment::getPayStatus, PaymentStatusEnum.PROCESSING)
+        );
+        if (processingRefundCount > 0) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "当前订单退款处理中，不能执行履约操作。");
+        }
+        return order;
     }
 
     private String orderStatusLabel(OrderStatusEnum status) {
@@ -825,5 +875,52 @@ public class AdminController {
             case 2 -> "模拟网关";
             default -> "未知渠道";
         };
+    }
+
+    private Long readRowLong(Map<String, Object> row, String key, Long defaultValue) {
+        Object value = readRowValue(row, key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return Long.parseLong(value.toString());
+    }
+
+    private Integer readRowInteger(Map<String, Object> row, String key, Integer defaultValue) {
+        Object value = readRowValue(row, key);
+        if (value == null || value.toString().isBlank()) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return Integer.parseInt(value.toString());
+    }
+
+    private String readRowText(Map<String, Object> row, String key) {
+        Object value = readRowValue(row, key);
+        return value == null ? "" : value.toString();
+    }
+
+    private Object readRowValue(Map<String, Object> row, String key) {
+        if (row == null || key == null) {
+            return null;
+        }
+        if (row.containsKey(key)) {
+            return row.get(key);
+        }
+        String normalizedKey = normalizeRowKey(key);
+        for (Map.Entry<String, Object> entry : row.entrySet()) {
+            if (normalizeRowKey(entry.getKey()).equals(normalizedKey)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private String normalizeRowKey(String key) {
+        return key == null ? "" : key.replace("_", "").toLowerCase();
     }
 }

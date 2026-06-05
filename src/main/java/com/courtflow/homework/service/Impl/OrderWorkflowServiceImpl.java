@@ -130,8 +130,9 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "仅已支付订单支持退款。");
         }
         Reservation reservation = findReservationByOrder(orderId);
-        if (reservation != null && reservation.getStatus() == ReservationStatusEnum.FINISHED) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "已履约预约不支持退款。");
+        if (reservation != null && (reservation.getStatus() == ReservationStatusEnum.CHECKED_IN
+                || reservation.getStatus() == ReservationStatusEnum.FINISHED)) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "已签到或已履约预约不支持退款。");
         }
 
         Payment sourcePayment = latestSuccessfulPayment(orderId);

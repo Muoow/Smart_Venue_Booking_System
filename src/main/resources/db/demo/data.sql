@@ -5,7 +5,7 @@ INSERT INTO user (id, username, nickname, full_name, status, created_at, balance
 
 INSERT INTO user_auth (id, user_id, identity_type, identifier, credential, last_login_at, created_at, updated_at) VALUES
     (1, 1, 'username', 'caojinshuo', '$2a$10$sqFCNyKfS1jE7.Wi43rObOluwQgyCJUA9UTMkb7jeIXTM9M5fsuL6', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-    (2, 2, 'username', 'admin', '$2a$10$BDcB1dak9S1Nh3nwQNfM/uD/tTH3AKSQy9eWd0.6Lyx8XhPzQhipi', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    (2, 2, 'username', 'admin', '$2a$10$sqFCNyKfS1jE7.Wi43rObOluwQgyCJUA9UTMkb7jeIXTM9M5fsuL6', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     (3, 3, 'username', 'zhangxiang', '$2a$10$sqFCNyKfS1jE7.Wi43rObOluwQgyCJUA9UTMkb7jeIXTM9M5fsuL6', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 INSERT INTO venue (id, name, type, status, created_at) VALUES

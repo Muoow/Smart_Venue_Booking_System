@@ -336,7 +336,7 @@ function renderOrderFilters() {
 
 function getFilteredReservations() {
   if (state.ordersFilter === "active") {
-    return state.reservations.filter((item) => item.status === 0 || item.status === 1);
+    return state.reservations.filter((item) => item.status === 0 || item.status === 1 || item.status === 5);
   }
   if (state.ordersFilter === "done") {
     return state.reservations.filter((item) => item.status === 4);
@@ -954,6 +954,9 @@ async function savePasswordSettings() {
 function reservationStatusMeta(status) {
   if (status === 1) {
     return { label: "待使用", klass: "live" };
+  }
+  if (status === 5) {
+    return { label: "使用中", klass: "live" };
   }
   if (status === 2) {
     return { label: "已取消", klass: "warn" };

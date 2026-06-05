@@ -69,6 +69,7 @@ async function api(path, options = {}) {
   if (!response.ok || data.code !== 200) {
     const error = new Error(data.message || "请求失败");
     error.status = response.status;
+    error.code = data.code;
     throw error;
   }
 
@@ -112,6 +113,9 @@ function formatSlotRange(startUnit, endUnit, unitMinutes = 10) {
 function statusMeta(status) {
   if (status === 1) {
     return { label: "待使用", klass: "live" };
+  }
+  if (status === 5) {
+    return { label: "使用中", klass: "live" };
   }
   if (status === 2) {
     return { label: "已取消", klass: "warn" };
@@ -256,11 +260,14 @@ function renderSystemStatus() {
 
 function reservationActionButtons(item) {
   const actions = [];
-  if (item.status !== 2) {
+  if (item.status === 0 || item.status === 1) {
     actions.push(`<button class="row-btn warn" data-action="cancel-reservation" data-id="${item.id}" type="button">取消</button>`);
   }
-  if (item.status === 0 || item.status === 1) {
-    actions.push(`<button class="row-btn primary" data-action="finish-reservation" data-id="${item.id}" type="button">完结</button>`);
+  if (item.status === 1) {
+    actions.push(`<button class="row-btn primary" data-action="checkin-reservation" data-id="${item.id}" type="button">到场签到</button>`);
+  }
+  if (item.status === 5) {
+    actions.push(`<button class="row-btn primary" data-action="finish-reservation" data-id="${item.id}" type="button">结束使用</button>`);
   }
   return actions.join("");
 }
@@ -579,10 +586,12 @@ async function loadData() {
       fillResourceForm(null);
     }
   } catch (error) {
-    if (error.status === 401 || error.status === 403) {
+    if (error.status === 401 || error.status === 403 || error.code === 401 || error.code === 403) {
       state.token = "";
       localStorage.removeItem("courtflow-admin-token");
       setAdminLocked(true);
+      setMessage("请使用管理员账号重新登录。", "未登录");
+      return;
     }
     setMessage(error.message, "加载失败");
     els.venueSummary.innerHTML = `<div class="empty-state">${error.message}</div>`;
@@ -699,6 +708,12 @@ async function handleTableAction(event) {
     return;
   }
 
+  if (action === "checkin-reservation") {
+    await api(`/admin/reservations/${numericId}/check-in`, { method: "POST" });
+    await loadData();
+    return;
+  }
+
   if (action === "save-user") {
     const role = document.querySelector(`[data-role-select="${numericId}"]`)?.value;
     const status = Number(document.querySelector(`[data-status-select="${numericId}"]`)?.value);
@@ -787,7 +802,7 @@ setView("overview");
 if (autoLoginUser && !state.token) {
   setAdminLocked(true);
   els.username.value = autoLoginUser;
-  els.password.value = "demo";
+  els.password.value = "12345";
   loginAdmin();
 } else if (state.token) {
   loadData();
