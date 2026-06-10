@@ -99,6 +99,7 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
         if (order.getStatus() != OrderStatusEnum.UNPAID) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "当前订单状态不能支付。");
         }
+        ensureOrderReservationPayable(order);
 
         User user = requireEnabledUser(userId);
         int channel = normalizeChannel(payChannel);
@@ -192,7 +193,7 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
     }
 
     @Override
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public Payment reviewPayment(Long paymentId, boolean approve, String operator, String note) {
         Payment payment = requirePayment(paymentId);
         if (payment.getPayStatus() != PaymentStatusEnum.PROCESSING) {
@@ -333,6 +334,9 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
         if (order.getStatus() != OrderStatusEnum.UNPAID) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "当前订单状态不允许审核支付。");
         }
+        if (approve) {
+            ensureOrderReservationPayable(order);
+        }
 
         Date now = new Date();
         String decisionNote = buildReviewNote(approve, operator, note);
@@ -424,6 +428,21 @@ public class OrderWorkflowServiceImpl implements OrderWorkflowService {
                 .sorted(Comparator.comparing(Reservation::getCreatedAt, Comparator.nullsLast(Date::compareTo)).reversed())
                 .findFirst()
                 .orElse(null);
+    }
+
+    private void ensureOrderReservationPayable(Order order) {
+        Reservation reservation = findReservationByOrder(order.getId());
+        if (reservation == null) {
+            closeOrderInternal(order, "SYSTEM", "订单未关联有效预约，系统自动关闭。", false);
+            throw new BusinessException(ResultCode.BAD_REQUEST, "当前订单未关联有效预约，不能继续支付。");
+        }
+        if (reservation.getStatus() == ReservationStatusEnum.QUEUING) {
+            throw new BusinessException(ResultCode.CONFLICT, "预约仍在处理中，请等待占位完成后再支付。");
+        }
+        if (reservation.getStatus() != ReservationStatusEnum.RESERVED) {
+            closeOrderInternal(order, "SYSTEM", "关联预约状态已失效，系统自动关闭订单。", false);
+            throw new BusinessException(ResultCode.BAD_REQUEST, "关联预约状态已失效，当前订单不能继续支付。");
+        }
     }
 
     private Payment latestSuccessfulPayment(Long orderId) {

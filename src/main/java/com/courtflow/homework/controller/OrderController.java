@@ -110,6 +110,12 @@ public class OrderController {
                 || reservation.getStatus() == ReservationStatusEnum.EXPIRED) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "当前预约状态不能创建订单。");
         }
+        if (reservation.getStatus() == ReservationStatusEnum.QUEUING) {
+            throw new BusinessException(ResultCode.CONFLICT, "预约正在处理中，请等待占位完成后再创建订单。");
+        }
+        if (reservation.getStatus() != ReservationStatusEnum.RESERVED) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "仅待使用预约可创建订单。");
+        }
 
         VenueResource resource = venueResourceMapper.selectById(reservation.getResourceId());
         if (resource == null) {

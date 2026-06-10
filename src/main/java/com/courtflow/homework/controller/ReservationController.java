@@ -8,6 +8,8 @@ import com.courtflow.homework.common.dto.response.ApiResponse;
 import com.courtflow.homework.common.dto.response.ResultCode;
 import com.courtflow.homework.common.exception.BusinessException;
 import com.courtflow.homework.common.vo.ReservationVO;
+import com.courtflow.homework.entity.Reservation;
+import com.courtflow.homework.mapping.ReservationMapper;
 import com.courtflow.homework.service.ReservationService;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,9 +24,11 @@ import java.util.Map;
 public class ReservationController {
 
     private final ReservationService reservationService;
+    private final ReservationMapper reservationMapper;
 
-    public ReservationController(ReservationService reservationService) {
+    public ReservationController(ReservationService reservationService, ReservationMapper reservationMapper) {
         this.reservationService = reservationService;
+        this.reservationMapper = reservationMapper;
     }
 
     @PostMapping("/apply")
@@ -54,6 +58,7 @@ public class ReservationController {
 
     @GetMapping("/{id}")
     public ApiResponse<ReservationVO> getById(@PathVariable Long id) {
+        assertReservationAccessible(id);
         return ApiResponse.success(reservationService.getById(id));
     }
 
@@ -67,7 +72,26 @@ public class ReservationController {
 
     @PostMapping("/{id}/cancel")
     public ApiResponse<Boolean> cancel(@PathVariable Long id) {
+        assertReservationAccessible(id);
         return ApiResponse.success(reservationService.cancel(id));
+    }
+
+    private void assertReservationAccessible(Long reservationId) {
+        Long currentUserId = UserContext.getUserId();
+        if (currentUserId == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED, "请先登录。");
+        }
+        if ("ADMIN".equalsIgnoreCase(UserContext.getRole())) {
+            return;
+        }
+
+        Reservation reservation = reservationMapper.selectById(reservationId);
+        if (reservation == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "预约记录不存在。");
+        }
+        if (!currentUserId.equals(reservation.getUserId())) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "无权访问该预约记录。");
+        }
     }
 
     private Date parseSlotDate(String slotDate) {

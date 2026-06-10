@@ -19,11 +19,13 @@ import com.courtflow.homework.entity.Payment;
 import com.courtflow.homework.entity.Reservation;
 import com.courtflow.homework.entity.User;
 import com.courtflow.homework.entity.Venue;
+import com.courtflow.homework.entity.VenueAdmin;
 import com.courtflow.homework.entity.VenueResource;
 import com.courtflow.homework.mapping.OrderMapper;
 import com.courtflow.homework.mapping.PaymentMapper;
 import com.courtflow.homework.mapping.ReservationMapper;
 import com.courtflow.homework.mapping.UserMapper;
+import com.courtflow.homework.mapping.VenueAdminMapper;
 import com.courtflow.homework.mapping.VenueMapper;
 import com.courtflow.homework.mapping.VenueResourceMapper;
 import com.courtflow.homework.service.OrderWorkflowService;
@@ -51,6 +53,8 @@ public class AdminController {
 
     private final PaymentMapper paymentMapper;
 
+    private final VenueAdminMapper venueAdminMapper;
+
     private final ReservationService reservationService;
 
     private final OrderWorkflowService orderWorkflowService;
@@ -62,6 +66,7 @@ public class AdminController {
             UserMapper userMapper,
             OrderMapper orderMapper,
             PaymentMapper paymentMapper,
+            VenueAdminMapper venueAdminMapper,
             ReservationService reservationService,
             OrderWorkflowService orderWorkflowService
     ) {
@@ -71,13 +76,33 @@ public class AdminController {
         this.userMapper = userMapper;
         this.orderMapper = orderMapper;
         this.paymentMapper = paymentMapper;
+        this.venueAdminMapper = venueAdminMapper;
         this.reservationService = reservationService;
         this.orderWorkflowService = orderWorkflowService;
     }
 
+    @GetMapping("/profile")
+    public ApiResponse<Map<String, Object>> profile() {
+        assertAdminPanelUser();
+        List<Long> managedVenueIds = getManagedVenueIds();
+        List<String> managedVenueNames = managedVenueIds.isEmpty()
+                ? List.of()
+                : venueMapper.selectBatchIds(managedVenueIds).stream()
+                .sorted(Comparator.comparing(Venue::getId, Comparator.nullsLast(Long::compareTo)))
+                .map(Venue::getName)
+                .toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("role", UserContext.getRole());
+        result.put("isSuperAdmin", isSuperAdmin());
+        result.put("managedVenueIds", managedVenueIds);
+        result.put("managedVenueNames", managedVenueNames);
+        return ApiResponse.success(result);
+    }
+
     @GetMapping("/dashboard")
     public ApiResponse<Map<String, Object>> dashboard() {
-        assertAdmin();
+        assertSuperAdmin();
 
         long venueCount = venueMapper.selectCount(Wrappers.<Venue>lambdaQuery());
         long enabledVenueCount = venueMapper.selectCount(
@@ -129,12 +154,15 @@ public class AdminController {
 
     @GetMapping("/venues")
     public ApiResponse<List<Map<String, Object>>> venues() {
-        assertAdmin();
+        assertAdminPanelUser();
+        Set<Long> scopedVenueIds = getScopedVenueIds();
 
         Map<Long, List<Map<String, Object>>> resourcesByVenue = venueResourceMapper.selectAllForAdmin().stream()
+                .filter(row -> scopedVenueIds == null || scopedVenueIds.contains(readRowLong(row, "venueId", -1L)))
                 .collect(Collectors.groupingBy(row -> readRowLong(row, "venueId", -1L), LinkedHashMap::new, Collectors.toList()));
 
         List<Map<String, Object>> data = venueMapper.selectAllForAdmin().stream()
+                .filter(venue -> scopedVenueIds == null || scopedVenueIds.contains(readRowLong(venue, "venueId", null)))
                 .map(venue -> {
                     Long venueId = readRowLong(venue, "venueId", null);
                     List<Map<String, Object>> resources = resourcesByVenue.getOrDefault(venueId, List.of());
@@ -154,7 +182,7 @@ public class AdminController {
 
     @PostMapping("/venues")
     public ApiResponse<Map<String, Object>> createVenue(@RequestBody Map<String, Object> payload) {
-        assertAdmin();
+        assertSuperAdmin();
 
         Venue venue = Venue.builder()
                 .name(requireText(payload, "name", "场馆名称不能为空"))
@@ -168,7 +196,7 @@ public class AdminController {
 
     @PutMapping("/venues/{id}")
     public ApiResponse<Map<String, Object>> updateVenue(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
-        assertAdmin();
+        assertSuperAdmin();
 
         Venue venue = requireVenue(id);
         venue.setName(requireText(payload, "name", "场馆名称不能为空"));
@@ -178,10 +206,24 @@ public class AdminController {
         return ApiResponse.success(toVenueRow(venue));
     }
 
+    @PostMapping("/venues/{id}/status")
+    public ApiResponse<Map<String, Object>> updateVenueStatus(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
+        assertAdminPanelUser();
+
+        Venue venue = requireManagedVenue(id);
+        Integer nextStatus = readInteger(payload, "status", null);
+        if (nextStatus == null || !List.of(0, 1).contains(nextStatus)) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "场馆状态不合法。");
+        }
+        venue.setStatus(nextStatus);
+        venueMapper.updateById(venue);
+        return ApiResponse.success(toVenueRow(venue));
+    }
+
     @DeleteMapping("/venues/{id}")
     @Transactional
     public ApiResponse<Boolean> deleteVenue(@PathVariable Long id) {
-        assertAdmin();
+        assertSuperAdmin();
         requireVenue(id);
 
         long resourceCount = venueResourceMapper.selectCount(
@@ -204,9 +246,11 @@ public class AdminController {
 
     @GetMapping("/resources")
     public ApiResponse<List<Map<String, Object>>> resources() {
-        assertAdmin();
+        assertAdminPanelUser();
+        Set<Long> scopedVenueIds = getScopedVenueIds();
 
         Map<Long, String> venueNameMap = venueMapper.selectAllForAdmin().stream()
+                .filter(row -> scopedVenueIds == null || scopedVenueIds.contains(readRowLong(row, "venueId", null)))
                 .collect(Collectors.toMap(
                         row -> readRowLong(row, "venueId", null),
                         row -> readRowText(row, "venueName"),
@@ -215,6 +259,7 @@ public class AdminController {
                 ));
 
         List<Map<String, Object>> data = venueResourceMapper.selectAllForAdmin().stream()
+                .filter(resource -> scopedVenueIds == null || scopedVenueIds.contains(readRowLong(resource, "venueId", null)))
                 .map(resource -> {
                     Long venueId = readRowLong(resource, "venueId", null);
                     Map<String, Object> row = toAdminResourceRow(resource);
@@ -227,10 +272,10 @@ public class AdminController {
 
     @PostMapping("/resources")
     public ApiResponse<Map<String, Object>> createResource(@RequestBody Map<String, Object> payload) {
-        assertAdmin();
+        assertAdminPanelUser();
 
         Long venueId = requireLong(payload, "venueId", "请选择所属场馆");
-        requireVenue(venueId);
+        requireManagedVenue(venueId);
 
         VenueResource resource = VenueResource.builder()
                 .venueId(venueId)
@@ -249,11 +294,11 @@ public class AdminController {
 
     @PutMapping("/resources/{id}")
     public ApiResponse<Map<String, Object>> updateResource(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
-        assertAdmin();
+        assertAdminPanelUser();
 
-        VenueResource resource = requireResource(id);
+        VenueResource resource = requireManagedResource(id);
         Long venueId = requireLong(payload, "venueId", "请选择所属场馆");
-        requireVenue(venueId);
+        requireManagedVenue(venueId);
         resource.setVenueId(venueId);
         resource.setName(requireText(payload, "name", "资源名称不能为空"));
         resource.setResourceType(requireResourceType(readInteger(payload, "resourceType", null)));
@@ -270,8 +315,8 @@ public class AdminController {
 
     @DeleteMapping("/resources/{id}")
     public ApiResponse<Boolean> deleteResource(@PathVariable Long id) {
-        assertAdmin();
-        requireResource(id);
+        assertAdminPanelUser();
+        requireManagedResource(id);
 
         long reservationCount = reservationMapper.selectCount(
                 Wrappers.<Reservation>lambdaQuery().eq(Reservation::getResourceId, id)
@@ -292,7 +337,8 @@ public class AdminController {
             @RequestParam(required = false) String slotDate,
             @RequestParam(required = false) String keyword
     ) {
-        assertAdmin();
+        assertAdminPanelUser();
+        Set<Long> scopedVenueIds = getScopedVenueIds();
 
         Date filterDate = parseDateOnly(slotDate);
         String filterKeyword = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
@@ -306,6 +352,7 @@ public class AdminController {
 
         List<Reservation> filtered = reservationMapper.selectList(Wrappers.<Reservation>lambdaQuery()).stream()
                 .sorted(Comparator.comparing(Reservation::getCreatedAt, Comparator.nullsLast(Date::compareTo)).reversed())
+                .filter(item -> scopedVenueIds == null || scopedVenueIds.contains(item.getVenueId()))
                 .filter(item -> status == null || item.getStatus() == requireReservationStatus(status))
                 .filter(item -> filterDate == null || sameDay(item.getSlotDate(), filterDate))
                 .filter(item -> reservationMatchesKeyword(item, filterKeyword, userNameMap, venueNameMap, resourceMap))
@@ -327,18 +374,16 @@ public class AdminController {
 
     @PostMapping("/reservations/{id}/cancel")
     public ApiResponse<Boolean> cancelReservation(@PathVariable Long id) {
-        assertAdmin();
+        assertAdminPanelUser();
+        requireManagedReservation(id);
         return ApiResponse.success(reservationService.cancel(id));
     }
 
     @PostMapping("/reservations/{id}/finish")
     public ApiResponse<Boolean> finishReservation(@PathVariable Long id) {
-        assertAdmin();
+        assertAdminPanelUser();
 
-        Reservation reservation = reservationMapper.selectById(id);
-        if (reservation == null) {
-            throw new BusinessException(ResultCode.NOT_FOUND, "预约记录不存在。");
-        }
+        Reservation reservation = requireManagedReservation(id);
         if (reservation.getStatus() == ReservationStatusEnum.FINISHED) {
             return ApiResponse.success(true);
         }
@@ -354,12 +399,9 @@ public class AdminController {
 
     @PostMapping("/reservations/{id}/check-in")
     public ApiResponse<Boolean> checkInReservation(@PathVariable Long id) {
-        assertAdmin();
+        assertAdminPanelUser();
 
-        Reservation reservation = reservationMapper.selectById(id);
-        if (reservation == null) {
-            throw new BusinessException(ResultCode.NOT_FOUND, "预约记录不存在。");
-        }
+        Reservation reservation = requireManagedReservation(id);
         if (reservation.getStatus() == ReservationStatusEnum.CHECKED_IN) {
             return ApiResponse.success(true);
         }
@@ -378,7 +420,7 @@ public class AdminController {
 
     @GetMapping("/users")
     public ApiResponse<List<Map<String, Object>>> users() {
-        assertAdmin();
+        assertSuperAdmin();
 
         Map<Long, Long> reservationCountMap = reservationMapper.selectList(Wrappers.<Reservation>lambdaQuery()).stream()
                 .collect(Collectors.groupingBy(Reservation::getUserId, Collectors.counting()));
@@ -406,14 +448,14 @@ public class AdminController {
 
     @PutMapping("/users/{id}")
     public ApiResponse<Map<String, Object>> updateUser(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
-        assertAdmin();
+        assertSuperAdmin();
 
         User user = requireUser(id);
         String role = Optional.ofNullable(payload.get("role")).map(Object::toString).orElse(user.getRole());
         Integer status = readInteger(payload, "status", user.getStatus().getValue());
         Long balance = readLong(payload, "balance", user.getBalance());
 
-        if (!List.of("USER", "ADMIN").contains(role.toUpperCase(Locale.ROOT))) {
+        if (!List.of("USER", "ADMIN", "VENUE_ADMIN").contains(role.toUpperCase(Locale.ROOT))) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "用户角色不合法。");
         }
 
@@ -435,7 +477,7 @@ public class AdminController {
 
     @GetMapping("/orders")
     public ApiResponse<List<Map<String, Object>>> orders() {
-        assertAdmin();
+        assertSuperAdmin();
         List<Order> orders = orderMapper.selectList(Wrappers.<Order>lambdaQuery()).stream()
                 .sorted(Comparator.comparing(Order::getCreatedAt, Comparator.nullsLast(Date::compareTo)).reversed())
                 .toList();
@@ -445,7 +487,7 @@ public class AdminController {
 
     @GetMapping("/payments")
     public ApiResponse<List<Map<String, Object>>> payments() {
-        assertAdmin();
+        assertSuperAdmin();
         Map<Long, Order> orderMap = orderMapper.selectList(Wrappers.<Order>lambdaQuery()).stream()
                 .collect(Collectors.toMap(Order::getId, Function.identity()));
         List<Map<String, Object>> data = paymentMapper.selectList(Wrappers.<Payment>lambdaQuery()).stream()
@@ -477,7 +519,7 @@ public class AdminController {
 
     @PostMapping("/payments/{id}/approve")
     public ApiResponse<Map<String, Object>> approvePayment(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> payload) {
-        assertAdmin();
+        assertSuperAdmin();
         String note = payload == null ? null : Optional.ofNullable(payload.get("note")).map(Object::toString).orElse(null);
         Payment payment = orderWorkflowService.reviewPayment(id, true, UserContext.getRole(), note);
         return ApiResponse.success(buildPaymentRow(payment));
@@ -485,7 +527,7 @@ public class AdminController {
 
     @PostMapping("/payments/{id}/reject")
     public ApiResponse<Map<String, Object>> rejectPayment(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> payload) {
-        assertAdmin();
+        assertSuperAdmin();
         String note = payload == null ? null : Optional.ofNullable(payload.get("note")).map(Object::toString).orElse(null);
         Payment payment = orderWorkflowService.reviewPayment(id, false, UserContext.getRole(), note);
         return ApiResponse.success(buildPaymentRow(payment));
@@ -493,22 +535,75 @@ public class AdminController {
 
     @PostMapping("/orders/{id}/close")
     public ApiResponse<Boolean> closeOrder(@PathVariable Long id) {
-        assertAdmin();
+        assertSuperAdmin();
         orderWorkflowService.closeOrder(id, UserContext.getRole(), "管理员手动关闭订单。");
         return ApiResponse.success(true);
     }
 
     @PostMapping("/orders/{id}/refund")
     public ApiResponse<Boolean> refundOrder(@PathVariable Long id) {
-        assertAdmin();
+        assertSuperAdmin();
         orderWorkflowService.refundOrder(id, UserContext.getRole());
         return ApiResponse.success(true);
     }
 
-    private void assertAdmin() {
-        if (!"ADMIN".equalsIgnoreCase(UserContext.getRole())) {
+    private void assertAdminPanelUser() {
+        if (!isSuperAdmin() && !isVenueAdmin()) {
             throw new BusinessException(ResultCode.FORBIDDEN, "管理员权限不足。");
         }
+    }
+
+    private void assertSuperAdmin() {
+        if (!isSuperAdmin()) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "仅超级管理员可访问该功能。");
+        }
+    }
+
+    private boolean isSuperAdmin() {
+        return "ADMIN".equalsIgnoreCase(UserContext.getRole());
+    }
+
+    private boolean isVenueAdmin() {
+        return "VENUE_ADMIN".equalsIgnoreCase(UserContext.getRole());
+    }
+
+    private Set<Long> getScopedVenueIds() {
+        if (isSuperAdmin()) {
+            return null;
+        }
+        return new LinkedHashSet<>(getManagedVenueIds());
+    }
+
+    private List<Long> getManagedVenueIds() {
+        if (isSuperAdmin()) {
+            return venueMapper.selectList(Wrappers.<Venue>lambdaQuery()).stream()
+                    .map(Venue::getId)
+                    .sorted()
+                    .toList();
+        }
+        if (!isVenueAdmin()) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "管理员权限不足。");
+        }
+        List<Long> venueIds = venueAdminMapper.selectList(
+                        Wrappers.<VenueAdmin>lambdaQuery().eq(VenueAdmin::getUserId, UserContext.getUserId())
+                ).stream()
+                .map(VenueAdmin::getVenueId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .toList();
+        if (venueIds.isEmpty()) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "当前场地管理员未绑定可管理的场馆。");
+        }
+        return venueIds;
+    }
+
+    private Venue requireManagedVenue(Long id) {
+        Venue venue = requireVenue(id);
+        if (!isSuperAdmin() && !getScopedVenueIds().contains(id)) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "无权管理该场馆。");
+        }
+        return venue;
     }
 
     private Venue requireVenue(Long id) {
@@ -525,6 +620,21 @@ public class AdminController {
             throw new BusinessException(ResultCode.NOT_FOUND, "资源不存在。");
         }
         return resource;
+    }
+
+    private VenueResource requireManagedResource(Long id) {
+        VenueResource resource = requireResource(id);
+        requireManagedVenue(resource.getVenueId());
+        return resource;
+    }
+
+    private Reservation requireManagedReservation(Long id) {
+        Reservation reservation = reservationMapper.selectById(id);
+        if (reservation == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "预约记录不存在。");
+        }
+        requireManagedVenue(reservation.getVenueId());
+        return reservation;
     }
 
     private User requireUser(Long id) {
