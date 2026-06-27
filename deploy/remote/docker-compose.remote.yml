@@ -55,10 +55,11 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ~/docker/prometheus:/prometheus
+      - prometheus_data:/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     command:
       - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
     networks:
       - backend
 
@@ -69,7 +70,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ~/docker/grafana:/var/lib/grafana
+      - grafana_data:/var/lib/grafana
       - ./grafana-provisioning:/etc/grafana/provisioning
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -100,3 +101,7 @@ services:
 networks:
   backend:
     driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:

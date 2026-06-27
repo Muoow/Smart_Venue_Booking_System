@@ -82,50 +82,46 @@ public class RabbitConfig {
     }
 
     @Bean
-    public List<Queue> reservationQueues() {
-        List<Queue> queues = new ArrayList<>();
-        for(int i = 0; i < MqConstant.QUEUE_PARTITIONS; i++) {
-            queues.add(new Queue(MqConstant.RESERVATION_QUEUE + i, true));
-        }
-        return queues;
-    }
-
-    @Bean
-    public List<Binding> binding(DirectExchange reservationExchange, List<Queue> reservationQueues) {
-        List<Binding> bindings = new ArrayList<>();
-        for(int i = 0; i < reservationQueues.size(); i++) {
-            bindings.add(BindingBuilder
-                    .bind(reservationQueues.get(i))
+    public Declarables reservationDeclarables(DirectExchange reservationExchange) {
+        List<Declarable> declarables = new ArrayList<>();
+        declarables.add(reservationExchange);
+        for (int i = 0; i < MqConstant.QUEUE_PARTITIONS; i++) {
+            Queue queue = new Queue(MqConstant.RESERVATION_QUEUE + i, true);
+            declarables.add(queue);
+            declarables.add(BindingBuilder
+                    .bind(queue)
                     .to(reservationExchange)
                     .with(MqConstant.RESERVATION_ROUTING_KEY + i));
         }
-        return bindings;
+        return new Declarables(declarables);
     }
 
     @Bean
-    public List<SimpleMessageListenerContainer> simpleMessageListenerContainers(CachingConnectionFactory connectionFactory, ReservationHandler reservationHandler) {
-        List<SimpleMessageListenerContainer> containers = new ArrayList<>();
+    public SimpleMessageListenerContainer reservationMessageListenerContainer(
+            CachingConnectionFactory connectionFactory,
+            ReservationHandler reservationHandler
+    ) {
+        SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
+        String[] queueNames = new String[MqConstant.QUEUE_PARTITIONS];
         for (int i = 0; i < MqConstant.QUEUE_PARTITIONS; i++) {
-            SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
-            container.setQueueNames(MqConstant.RESERVATION_QUEUE + i);
-            container.setMessageListener((Message message) -> {
-                String text = new String(message.getBody(), StandardCharsets.UTF_8).trim();
-                if (text.startsWith("\"") && text.endsWith("\"") && text.length() >= 2) {
-                    text = text.substring(1, text.length() - 1);
-                }
-                try {
-                    reservationHandler.process(Long.parseLong(text));
-                } catch (NumberFormatException ex) {
-                    log.error("Invalid reservation message payload: {}", text, ex);
-                }
-            });
-            // Keep each partition queue single-threaded to preserve per-partition ordering.
-            container.setConcurrentConsumers(1);
-            container.setMaxConcurrentConsumers(1);
-            container.setPrefetchCount(1);
-            containers.add(container);
+            queueNames[i] = MqConstant.RESERVATION_QUEUE + i;
         }
-        return containers;
+        container.setQueueNames(queueNames);
+        container.setMessageListener((Message message) -> {
+            String text = new String(message.getBody(), StandardCharsets.UTF_8).trim();
+            if (text.startsWith("\"") && text.endsWith("\"") && text.length() >= 2) {
+                text = text.substring(1, text.length() - 1);
+            }
+            try {
+                reservationHandler.process(Long.parseLong(text));
+            } catch (NumberFormatException ex) {
+                log.error("Invalid reservation message payload: {}", text, ex);
+            }
+        });
+        container.setConcurrentConsumers(1);
+        container.setMaxConcurrentConsumers(1);
+        container.setPrefetchCount(1);
+        return container;
     }
 
     @Bean

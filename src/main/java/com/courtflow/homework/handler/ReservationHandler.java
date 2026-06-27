@@ -15,6 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.serializer.GenericToStringSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
@@ -34,6 +36,9 @@ public class ReservationHandler {
     private static final String RETRY_KEY_PREFIX = "courtflow:reservation:retry:";
     private static final long RETRY_KEY_TTL_SECONDS = 1800L;
     private static final int MAX_RETRY_ATTEMPTS = 3;
+    private static final StringRedisSerializer REDIS_SCRIPT_ARG_SERIALIZER = new StringRedisSerializer();
+    private static final GenericToStringSerializer<Long> REDIS_SCRIPT_RESULT_SERIALIZER =
+            new GenericToStringSerializer<>(Long.class);
 
     private final ReservationMapper reservationMapper;
 
@@ -270,6 +275,8 @@ public class ReservationHandler {
         );
         redisTemplate.execute(
                 RELEASE_INVENTORY_SCRIPT,
+                REDIS_SCRIPT_ARG_SERIALIZER,
+                REDIS_SCRIPT_RESULT_SERIALIZER,
                 new ArrayList<>(keys),
                 String.valueOf(Math.max(reservation.getSize() == null ? 0 : reservation.getSize(), 0)),
                 String.valueOf(calculateInventoryTtlSeconds(reservation.getSlotDate()))

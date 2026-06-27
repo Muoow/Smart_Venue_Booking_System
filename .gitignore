@@ -38,3 +38,12 @@ build/
 logs/
 .env
 test-artifacts/
+
+# Local performance testing assets
+scripts/generate-jmeter-report.py
+scripts/jmeter-reservation-concurrency.jmx
+scripts/run-jmeter-reservation-test.py
+scripts/run-reservation-concurrency-test.py
+scripts/run-light-load-test.py
+tools/apache-jmeter-*/
+tools/apache-jmeter-*.zip

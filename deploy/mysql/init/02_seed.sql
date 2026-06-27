@@ -147,7 +147,9 @@ VALUES
     (3, 2, 3),
     (4, 2, 4),
     (5, 2, 5),
-    (6, 2, 6)
+    (6, 2, 6),
+    (7, 4, 1),
+    (8, 5, 2)
 ON DUPLICATE KEY UPDATE
     user_id = VALUES(user_id),
     venue_id = VALUES(venue_id);

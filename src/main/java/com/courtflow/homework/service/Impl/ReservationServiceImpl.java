@@ -27,6 +27,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.serializer.GenericToStringSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -49,6 +51,9 @@ public class ReservationServiceImpl implements ReservationService {
     private static final int MAX_ADVANCE_BOOKING_DAYS = 14;
     private static final DefaultRedisScript<Long> RESERVE_INVENTORY_SCRIPT = buildReserveInventoryScript();
     private static final DefaultRedisScript<Long> RELEASE_INVENTORY_SCRIPT = buildReleaseInventoryScript();
+    private static final StringRedisSerializer REDIS_SCRIPT_ARG_SERIALIZER = new StringRedisSerializer();
+    private static final GenericToStringSerializer<Long> REDIS_SCRIPT_RESULT_SERIALIZER =
+            new GenericToStringSerializer<>(Long.class);
 
     private final ReservationMapper reservationMapper;
 
@@ -465,6 +470,8 @@ public class ReservationServiceImpl implements ReservationService {
         );
         Long result = redisTemplate.execute(
                 RESERVE_INVENTORY_SCRIPT,
+                REDIS_SCRIPT_ARG_SERIALIZER,
+                REDIS_SCRIPT_RESULT_SERIALIZER,
                 new ArrayList<>(keys),
                 String.valueOf(reservation.getSize()),
                 String.valueOf(safeCapacity(resource)),
@@ -497,6 +504,8 @@ public class ReservationServiceImpl implements ReservationService {
         );
         redisTemplate.execute(
                 RELEASE_INVENTORY_SCRIPT,
+                REDIS_SCRIPT_ARG_SERIALIZER,
+                REDIS_SCRIPT_RESULT_SERIALIZER,
                 new ArrayList<>(keys),
                 String.valueOf(Math.max(reservation.getSize() == null ? 0 : reservation.getSize(), 0)),
                 String.valueOf(calculateInventoryTtlSeconds(reservation.getSlotDate()))
